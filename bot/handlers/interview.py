@@ -1,13 +1,18 @@
 import json
 
-from backend.services.session_manager import (
-    create_session,
+from openai import OpenAI
+
+from backend.config import OPENAI_API_KEY
+from backend.handlers.interview_handler import (
+    end_session,
     get_session,
-    update_session,
-    end_session
+    handle_next_question,
+    set_pending_answer,
+    start_interview,
 )
-from backend.services.llm_engine import generate_response, client
-from backend.services.limiter import can_start_session
+from backend.services.llm_engine import generate_response
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def map_decision(score: float):
@@ -38,15 +43,15 @@ async def interview(update, context):
     if state == "ASK_JD":
         context.user_data["jd_text"] = text
 
-        if not can_start_session(user_id):
-            await update.message.reply_text("Daily free limit reached.")
-            return
-
-        create_session(
+        start_result = start_interview(
             user_id,
             role=context.user_data["role"],
-            jd_text=context.user_data["jd_text"]
+            jd_text=context.user_data["jd_text"],
         )
+
+        if start_result["status"] != "started":
+            await update.message.reply_text("Daily free limit reached.")
+            return
 
         context.user_data["state"] = "IN_INTERVIEW"
 
@@ -62,20 +67,22 @@ async def interview(update, context):
         await update.message.reply_text("Type /start to begin.")
         return
 
-    result = generate_response(
-        role=session["role"],
-        jd_text=session["jd_text"],
-        user_input=text,
-        session=session
-    )
+    if not set_pending_answer(user_id, text):
+        await update.message.reply_text("Type /start to begin.")
+        return
 
-    session["questions_asked"] += 1
-    session["history"].append(text)
+    handler_result = handle_next_question(user_id, generate_response)
 
-    if "scores" not in session:
-        session["scores"] = []
+    if handler_result["status"] == "blocked":
+        await update.message.reply_text("Session question limit reached.")
+        return
 
-    session["scores"].append(result["score"])
+    if handler_result["status"] != "ok":
+        await update.message.reply_text("Type /start to begin.")
+        return
+
+    result = handler_result["data"]
+    session = get_session(user_id)
 
     scores = session["scores"]
 
@@ -150,7 +157,7 @@ Action:
         return
 
     # -------- NORMAL FINAL --------
-    if session["questions_asked"] >= 5:
+    if session["question_count"] >= 5:
         avg_score = round(sum(scores) / len(scores), 1)
         decision = map_decision(avg_score)
 
@@ -218,9 +225,6 @@ Action:
 """
         )
         return
-
-    # Continue interview
-    update_session(user_id, session)
 
     await update.message.reply_text(
         f"Score: {result['score']}\n{result['feedback']}\n\nNext: {result['next_question']}"
