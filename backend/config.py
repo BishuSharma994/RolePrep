@@ -21,6 +21,7 @@ def get_clean(key):
 
 
 TELEGRAM_BOT_TOKEN = get_clean("TELEGRAM_BOT_TOKEN")
+TELEGRAM_WEBHOOK_URL = get_clean("TELEGRAM_WEBHOOK_URL")
 OPENAI_API_KEY = get_clean("OPENAI_API_KEY")
 REDIS_URL = get_clean("REDIS_URL")
 
