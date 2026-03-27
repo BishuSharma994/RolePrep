@@ -1,3 +1,4 @@
+from backend.handlers.payment_handler import handle_payment_request
 from backend.services.plan_manager import can_ask_question, can_start_session, increment_usage
 
 SESSIONS = {}
@@ -5,7 +6,7 @@ SESSIONS = {}
 
 def start_interview(user_id: str, role: str, jd_text: str):
     if not can_start_session(user_id):
-        return {"status": "blocked", "reason": "daily_limit_reached"}
+        return handle_payment_request(user_id, "session")
 
     increment_usage(user_id)
 
@@ -41,7 +42,7 @@ def handle_next_question(user_id: str, engine_fn):
 
     current_q_count = session.get("question_count", 0)
     if not can_ask_question(user_id, current_q_count):
-        return {"status": "blocked", "reason": "question_limit_reached"}
+        return handle_payment_request(user_id, "session")
 
     pending_answer = session.get("pending_answer")
     if pending_answer is None:

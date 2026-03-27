@@ -1,0 +1,25 @@
+from backend.services.payment import create_payment_link
+from backend.services.plan_manager import add_session_credits, activate_subscription
+
+
+def handle_payment_request(user_id, plan_type):
+    payment_link = create_payment_link(user_id, plan_type)
+    return {
+        "status": "payment_required",
+        "plan": plan_type,
+        "payment_link": payment_link,
+    }
+
+
+def confirm_payment(user_id, plan_type):
+    if plan_type == "session":
+        add_session_credits(user_id, 1)
+    elif plan_type == "subscription":
+        activate_subscription(user_id, 30)
+    else:
+        raise ValueError("Unsupported plan_type")
+
+    return {
+        "status": "payment_confirmed",
+        "plan": plan_type,
+    }
