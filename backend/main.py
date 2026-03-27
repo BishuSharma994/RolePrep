@@ -1,8 +1,21 @@
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from backend.routes.telegram_webhook import router
+from bot.telegram_bot import shutdown, startup
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
 app.include_router(router)
 
 

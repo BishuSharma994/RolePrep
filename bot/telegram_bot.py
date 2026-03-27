@@ -3,7 +3,6 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    ContextTypes,
     filters
 )
 
@@ -18,6 +17,19 @@ app.add_handler(CommandHandler("start", start))
 
 # All text messages go to interview handler (state-driven)
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, interview))
+
+
+async def startup():
+    if not app.running:
+        await app.initialize()
+        await app.start()
+
+
+async def shutdown():
+    if app.running:
+        await app.stop()
+    if app._initialized:
+        await app.shutdown()
 
 
 async def process_update(data):
