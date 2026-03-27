@@ -24,14 +24,17 @@ def _get_env_value(key: str):
     return value
 
 
-RAZORPAY_KEY_ID = _get_env_value("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = _get_env_value("RAZORPAY_KEY_SECRET")
+RAZORPAY_KEY_ID = _get_env_value("RAZORPAY_KEY") or _get_env_value("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = _get_env_value("RAZORPAY_SECRET") or _get_env_value("RAZORPAY_KEY_SECRET")
 
 if not RAZORPAY_KEY_ID:
-    raise ValueError("Missing RAZORPAY_KEY_ID")
+    raise ValueError("Missing RAZORPAY_KEY or RAZORPAY_KEY_ID")
 
 if not RAZORPAY_KEY_SECRET:
-    raise ValueError("Missing RAZORPAY_KEY_SECRET")
+    raise ValueError("Missing RAZORPAY_SECRET or RAZORPAY_KEY_SECRET")
+
+if not RAZORPAY_KEY_ID.startswith("rzp_test_"):
+    raise ValueError("Razorpay test mode key required")
 
 client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -45,6 +48,7 @@ def create_payment_link(user_id, plan_type):
         {
             "amount": plan["amount"],
             "currency": "INR",
+            "accept_partial": False,
             "description": plan["description"],
             "notify": {
                 "sms": False,

@@ -49,8 +49,14 @@ async def interview(update, context):
             jd_text=context.user_data["jd_text"],
         )
 
+        if start_result["status"] == "payment_required":
+            await update.message.reply_text(
+                f"Limit reached.\n\nBuy 1 session here: {start_result['payment_link']}"
+            )
+            return
+
         if start_result["status"] != "started":
-            await update.message.reply_text("Daily free limit reached.")
+            await update.message.reply_text("Unable to start interview.")
             return
 
         context.user_data["state"] = "IN_INTERVIEW"
@@ -73,8 +79,10 @@ async def interview(update, context):
 
     handler_result = handle_next_question(user_id, generate_response)
 
-    if handler_result["status"] == "blocked":
-        await update.message.reply_text("Session question limit reached.")
+    if handler_result["status"] == "payment_required":
+        await update.message.reply_text(
+            f"Limit reached.\n\nBuy 1 session here: {handler_result['payment_link']}"
+        )
         return
 
     if handler_result["status"] != "ok":
