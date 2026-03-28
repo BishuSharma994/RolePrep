@@ -51,15 +51,44 @@ def build_policy_keyboard(plan_type):
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("View Policy", url=POLICY_URL)],
-            [InlineKeyboardButton("Accept & Continue", callback_data=f"accept_policy:{plan_type}")],
+            [InlineKeyboardButton("Buy 1 Session - Rs 99", callback_data="accept_policy:session")],
+            [InlineKeyboardButton("Upgrade to Premium - Rs 499", callback_data="accept_policy:subscription")],
         ]
     )
 
 
 async def send_policy_gate(message, plan_type):
     await message.reply_text(
-        "Before payment, you must accept our policy (no refunds).",
+        "Upgrade to Premium for your prep.\n\nBefore payment, you must accept our policy (no refunds).",
         reply_markup=build_policy_keyboard(plan_type),
+    )
+
+
+def begin_payment_wait(context, phase):
+    context.user_data["awaiting_payment"] = True
+    context.user_data["payment_context"] = phase
+
+
+def clear_payment_wait(context):
+    context.user_data.pop("awaiting_payment", None)
+    context.user_data.pop("payment_context", None)
+    context.user_data.pop("policy_accepted", None)
+    context.user_data.pop("pending_payment_plan", None)
+
+
+async def handle_awaiting_payment(message, context):
+    payment_context = context.user_data.get("payment_context", "start")
+
+    if payment_context == "continue":
+        await message.reply_text(
+            "Your payment link has already been shared.\n\n"
+            "After successful payment, start a fresh session with /start."
+        )
+        return
+
+    await message.reply_text(
+        "Your payment link has already been shared.\n\n"
+        "After successful payment, send /start to begin a new interview."
     )
 
 
@@ -69,6 +98,8 @@ async def handle_policy_accept(update, context):
     plan_type = query.data.split(":", 1)[1]
 
     context.user_data["policy_accepted"] = True
+    context.user_data["pending_payment_plan"] = plan_type
+    context.user_data["awaiting_payment"] = True
 
     payment_result = create_payment_after_consent(
         user_id,
@@ -78,7 +109,9 @@ async def handle_policy_accept(update, context):
 
     await query.answer("Policy accepted")
     await query.edit_message_text(
-        f"Policy accepted.\n\nComplete payment here: {payment_result['payment_link']}"
+        "Policy accepted.\n\n"
+        f"{'Upgrade to Premium for your prep' if plan_type == 'subscription' else 'Buy 1 extra session'}\n\n"
+        f"Complete payment here: {payment_result['payment_link']}"
     )
 
 
@@ -89,6 +122,10 @@ async def interview(update, context):
     document = message.document
 
     state = context.user_data.get("state")
+
+    if state == "AWAITING_PAYMENT" or context.user_data.get("awaiting_payment"):
+        await handle_awaiting_payment(message, context)
+        return
 
     if state == "ASK_ROLE":
         if not text:
@@ -153,6 +190,8 @@ async def interview(update, context):
         if start_result["status"] == "policy_required":
             cleanup_temp_file(context.user_data.pop("resume_path", None))
             cleanup_temp_file(context.user_data.pop("jd_path", None))
+            context.user_data["state"] = "AWAITING_PAYMENT"
+            begin_payment_wait(context, "start")
             await send_policy_gate(message, start_result["plan"])
             return
 
@@ -194,6 +233,9 @@ async def interview(update, context):
     handler_result = handle_next_question(user_id, generate_response)
 
     if handler_result["status"] == "policy_required":
+        end_session(user_id)
+        context.user_data["state"] = "AWAITING_PAYMENT"
+        begin_payment_wait(context, "continue")
         await send_policy_gate(message, handler_result["plan"])
         return
 
@@ -262,6 +304,7 @@ OUTPUT JSON:
 
         end_session(user_id)
         context.user_data["state"] = None
+        clear_payment_wait(context)
         context.user_data.pop("resume_path", None)
         context.user_data.pop("jd_path", None)
 
@@ -333,6 +376,7 @@ OUTPUT JSON:
 
         end_session(user_id)
         context.user_data["state"] = None
+        clear_payment_wait(context)
         context.user_data.pop("resume_path", None)
         context.user_data.pop("jd_path", None)
 
