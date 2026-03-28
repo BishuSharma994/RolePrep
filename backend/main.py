@@ -1,5 +1,9 @@
-from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
+# MUST be first
+load_dotenv(dotenv_path="backend/.env")
+
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from backend.bot.telegram_bot import shutdown, startup
