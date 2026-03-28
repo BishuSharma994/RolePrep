@@ -1,10 +1,8 @@
-import fitz
-import pdfplumber
-
-
 def extract_text_pymupdf(file_path: str) -> str:
     text = ""
     try:
+        import fitz
+
         doc = fitz.open(file_path)
         for page in doc:
             text += page.get_text()
@@ -17,6 +15,8 @@ def extract_text_pymupdf(file_path: str) -> str:
 def extract_text_pdfplumber(file_path: str) -> str:
     text = ""
     try:
+        import pdfplumber
+
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
                 text += page.extract_text() or ""
