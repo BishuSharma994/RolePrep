@@ -15,23 +15,57 @@ async def payment_webhook(
 ):
     raw_body = await request.body()
 
+    # --- SIGNATURE VERIFICATION ---
     if not verify_webhook_signature(raw_body, x_razorpay_signature):
         raise HTTPException(status_code=400, detail="invalid_signature")
 
+    # --- PARSE PAYLOAD ---
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="invalid_payload") from exc
 
-    if payload.get("event") != "payment_link.paid":
-        return {"status": "ignored"}
+    event = payload.get("event")
+    print("EVENT:", event)
 
-    payment_link = payload.get("payload", {}).get("payment_link", {}).get("entity", {})
-    notes = payment_link.get("notes", {})
-    user_id = notes.get("user_id")
-    plan_type = notes.get("plan_type")
+    # =========================
+    # ONE-TIME PAYMENT FLOW
+    # =========================
+    if event == "payment.captured":
+        payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
 
-    if not user_id or not plan_type:
-        raise HTTPException(status_code=400, detail="missing_payment_notes")
+        notes = payment.get("notes", {})
+        user_id = notes.get("user_id")
+        plan_type = notes.get("plan")
 
-    return confirm_payment(user_id, plan_type)
+        print("USER_ID:", user_id)
+        print("PLAN:", plan_type)
+
+        if not user_id or not plan_type:
+            raise HTTPException(status_code=400, detail="missing_payment_notes")
+
+        return confirm_payment(user_id, plan_type)
+
+    # =========================
+    # SUBSCRIPTION FLOW
+    # =========================
+    elif event.startswith("subscription."):
+        subscription = payload.get("payload", {}).get("subscription", {}).get("entity", {})
+
+        notes = subscription.get("notes", {})
+        user_id = notes.get("user_id")
+        plan_type = notes.get("plan")
+
+        print("SUB USER_ID:", user_id)
+        print("SUB PLAN:", plan_type)
+
+        if not user_id:
+            raise HTTPException(status_code=400, detail="missing_subscription_notes")
+
+        # reuse same handler or create separate one
+        return confirm_payment(user_id, plan_type or "subscription")
+
+    # =========================
+    # IGNORE EVERYTHING ELSE
+    # =========================
+    return {"status": "ignored"}
