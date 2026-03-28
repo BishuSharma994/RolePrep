@@ -1,9 +1,10 @@
 from dotenv import dotenv_values
 import os
 
-# Absolute path to .env (no dependency on working directory)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENV_PATH = os.path.join(BASE_DIR, ".env")
+# HARD FIX — always resolve backend root correctly
+CURRENT_FILE = os.path.abspath(__file__)
+BACKEND_DIR = os.path.dirname(os.path.dirname(CURRENT_FILE))  # backend/
+ENV_PATH = os.path.join(BACKEND_DIR, ".env")
 
 config = dotenv_values(ENV_PATH)
 
@@ -33,13 +34,13 @@ RAZORPAY_SECRET = get_clean("RAZORPAY_SECRET") or get_clean("RAZORPAY_KEY_SECRET
 RAZORPAY_WEBHOOK_SECRET = get_clean("RAZORPAY_WEBHOOK_SECRET")
 
 
-# Strict validation (only for required services)
+# Strict validation
 if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("Missing TELEGRAM_BOT_TOKEN")
+    raise ValueError(f"Missing TELEGRAM_BOT_TOKEN | ENV_PATH={ENV_PATH}")
 
 if not OPENAI_API_KEY:
-    raise ValueError("Missing OPENAI_API_KEY")
+    raise ValueError(f"Missing OPENAI_API_KEY | ENV_PATH={ENV_PATH}")
 
-# Optional: disable strict check if not using Redis yet
+# Optional
 # if not REDIS_URL:
 #     raise ValueError("Missing REDIS_URL")
