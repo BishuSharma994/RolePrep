@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from bot.telegram_bot import process_update
+from backend.bot.telegram_bot import process_update
 
 router = APIRouter()
 

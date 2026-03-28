@@ -19,7 +19,7 @@ def set_user_plan(user_id: str, plan: str):
 
 
 def increment_usage(user_id: str):
-    start_mode = STORE.pop(f"{user_id}:start_mode", None)
+    start_mode = STORE.get(f"{user_id}:session_access")
     if start_mode != "free":
         return
 
@@ -70,21 +70,31 @@ def is_subscription_active(user_id: str) -> bool:
 
 def can_start_session(user_id: str) -> bool:
     if is_subscription_active(user_id):
-        STORE[f"{user_id}:start_mode"] = "subscription"
+        STORE[f"{user_id}:session_access"] = "subscription"
         return True
 
     if use_session_credit(user_id):
-        STORE[f"{user_id}:start_mode"] = "credit"
+        STORE[f"{user_id}:session_access"] = "credit"
         return True
 
     if get_usage(user_id) < 1:
-        STORE[f"{user_id}:start_mode"] = "free"
+        STORE[f"{user_id}:session_access"] = "free"
         return True
 
     return False
 
 
+def get_current_access_mode(user_id: str) -> str:
+    if is_subscription_active(user_id):
+        return "subscription"
+    return STORE.get(f"{user_id}:session_access", "free")
+
+
+def clear_session_access(user_id: str):
+    STORE.pop(f"{user_id}:session_access", None)
+
+
 def can_ask_question(user_id: str, current_q_count: int) -> bool:
-    if get_user_plan(user_id) == "free":
+    if get_current_access_mode(user_id) == "free":
         return current_q_count < 5
     return True

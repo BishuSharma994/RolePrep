@@ -6,12 +6,12 @@ from backend.utils.config import RAZORPAY_KEY, RAZORPAY_SECRET, RAZORPAY_WEBHOOK
 
 PLAN_PRICING = {
     "session": {
-        "amount": 9900,
-        "description": "RolePrep - No Refund Digital Service",
+        "amount": 100,
+        "description": "RolePrep Digital Interview Service",
     },
     "subscription": {
-        "amount": 49900,
-        "description": "RolePrep - No Refund Digital Service",
+        "amount": 200,
+        "description": "RolePrep Digital Interview Service",
     },
 }
 
@@ -49,7 +49,6 @@ def create_payment_link(user_id, plan_type):
             "notes": {
                 "user_id": user_id,
                 "plan_type": plan_type,
-                "policy": "no_refund_accepted",
             },
         }
     )

@@ -18,7 +18,10 @@ async def payment_webhook(
     if not verify_webhook_signature(raw_body, x_razorpay_signature):
         raise HTTPException(status_code=400, detail="invalid_signature")
 
-    payload = json.loads(raw_body.decode("utf-8"))
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid_payload") from exc
 
     if payload.get("event") != "payment_link.paid":
         return {"status": "ignored"}

@@ -1,9 +1,18 @@
 import os
 
-from backend.handlers.payment_handler import handle_payment_request
-from backend.services.plan_manager import can_ask_question, can_start_session, increment_usage
+from backend.services.llm_engine import generate_response
+from backend.services.plan_manager import can_ask_question, can_start_session, clear_session_access, increment_usage
 
 SESSIONS = {}
+
+
+def run_interview_engine(role, jd_text, user_input, session):
+    return generate_response(
+        role=role,
+        jd_text=jd_text,
+        user_input=user_input,
+        session=session,
+    )
 
 
 def cleanup_session_files(session: dict):
@@ -22,7 +31,7 @@ def start_interview(
     jd_path: str | None = None,
 ):
     if not can_start_session(user_id):
-        return handle_payment_request(user_id, "session")
+        return {"status": "blocked", "reason": "session_limit_reached"}
 
     increment_usage(user_id)
 
@@ -61,7 +70,7 @@ def handle_next_question(user_id: str, engine_fn):
 
     current_q_count = session.get("question_count", 0)
     if not can_ask_question(user_id, current_q_count):
-        return handle_payment_request(user_id, "session")
+        return {"status": "blocked", "reason": "question_limit_reached"}
 
     pending_answer = session.get("pending_answer")
     if pending_answer is None:
@@ -86,5 +95,6 @@ def end_session(user_id: str):
     if user_id in SESSIONS:
         cleanup_session_files(SESSIONS[user_id])
         del SESSIONS[user_id]
+    clear_session_access(user_id)
 
     return {"status": "ended"}
