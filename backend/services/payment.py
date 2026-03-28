@@ -1,31 +1,22 @@
-import os
+import hashlib
+import hmac
 
 import razorpay
-from dotenv import dotenv_values
+from backend.utils.config import RAZORPAY_KEY, RAZORPAY_SECRET, RAZORPAY_WEBHOOK_SECRET
 
 PLAN_PRICING = {
     "session": {
         "amount": 9900,
-        "description": "RolePrep session purchase",
+        "description": "RolePrep - No Refund Digital Service",
     },
     "subscription": {
         "amount": 49900,
-        "description": "RolePrep 30-day subscription",
+        "description": "RolePrep - No Refund Digital Service",
     },
 }
 
-_ENV = dotenv_values(".env")
-
-
-def _get_env_value(key: str):
-    value = os.getenv(key) or _ENV.get(key)
-    if isinstance(value, str):
-        return value.strip()
-    return value
-
-
-RAZORPAY_KEY_ID = _get_env_value("RAZORPAY_KEY") or _get_env_value("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = _get_env_value("RAZORPAY_SECRET") or _get_env_value("RAZORPAY_KEY_SECRET")
+RAZORPAY_KEY_ID = RAZORPAY_KEY
+RAZORPAY_KEY_SECRET = RAZORPAY_SECRET
 
 if not RAZORPAY_KEY_ID:
     raise ValueError("Missing RAZORPAY_KEY or RAZORPAY_KEY_ID")
@@ -58,8 +49,21 @@ def create_payment_link(user_id, plan_type):
             "notes": {
                 "user_id": user_id,
                 "plan_type": plan_type,
+                "policy": "no_refund_accepted",
             },
         }
     )
 
     return payment_link["short_url"]
+
+
+def verify_webhook_signature(payload: bytes, signature: str) -> bool:
+    if not RAZORPAY_WEBHOOK_SECRET:
+        raise ValueError("Missing RAZORPAY_WEBHOOK_SECRET")
+
+    digest = hmac.new(
+        RAZORPAY_WEBHOOK_SECRET.encode(),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(digest, signature)

@@ -1,10 +1,26 @@
+import os
+
 from backend.handlers.payment_handler import handle_payment_request
 from backend.services.plan_manager import can_ask_question, can_start_session, increment_usage
 
 SESSIONS = {}
 
 
-def start_interview(user_id: str, role: str, jd_text: str):
+def cleanup_session_files(session: dict):
+    for key in ("resume_path", "jd_path"):
+        file_path = session.get(key)
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+
+
+def start_interview(
+    user_id: str,
+    role: str,
+    jd_text: str,
+    parser_data: dict | None = None,
+    resume_path: str | None = None,
+    jd_path: str | None = None,
+):
     if not can_start_session(user_id):
         return handle_payment_request(user_id, "session")
 
@@ -17,6 +33,9 @@ def start_interview(user_id: str, role: str, jd_text: str):
         "scores": [],
         "question_count": 0,
         "pending_answer": None,
+        "parser_data": parser_data or {},
+        "resume_path": resume_path,
+        "jd_path": jd_path,
     }
 
     return {"status": "started"}
@@ -65,6 +84,7 @@ def handle_next_question(user_id: str, engine_fn):
 
 def end_session(user_id: str):
     if user_id in SESSIONS:
+        cleanup_session_files(SESSIONS[user_id])
         del SESSIONS[user_id]
 
     return {"status": "ended"}

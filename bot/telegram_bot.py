@@ -1,23 +1,24 @@
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters
 )
 
-from backend.config import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_URL
-from bot.handlers.start import start
-from bot.handlers.interview import interview
+from backend.bot.handlers.interview import handle_policy_accept, interview
+from backend.bot.handlers.start import policy_command, start
+from backend.utils.config import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_URL
 
 app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 RUN_MODE = "polling"
 
-# Commands
 app.add_handler(CommandHandler("start", start))
-
-# All text messages go to interview handler (state-driven)
+app.add_handler(CommandHandler("policy", policy_command))
+app.add_handler(CallbackQueryHandler(handle_policy_accept, pattern=r"^accept_policy:"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, interview))
+app.add_handler(MessageHandler(filters.Document.PDF, interview))
 
 
 async def startup():
@@ -57,5 +58,4 @@ async def process_update(data):
 
 
 if __name__ == "__main__":
-    print("Bot running...")
     app.run_polling()
