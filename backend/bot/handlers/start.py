@@ -3,6 +3,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from backend.handlers.payment_handler import POLICY_URL, handle_payment_request
 from backend.handlers.plan_handler import get_plan, set_plan
 from backend.services.plan_manager import get_session_credits, is_subscription_active
+from backend.user_store import get_user_state
 
 
 def build_plan_keyboard():
@@ -101,4 +102,29 @@ async def policy_command(update, context):
         f'Read full policy:\n<a href="{POLICY_URL}">Policy &amp; Terms</a>',
         parse_mode="HTML",
         disable_web_page_preview=True,
+    )
+
+
+def handle_status(user_id):
+    state = get_user_state(user_id)
+
+    if state["is_premium"]:
+        return (
+            f"Premium Active\n"
+            f"Days left: {state['days_left']}\n"
+            f"Credits: {state['credits']}"
+        )
+
+    return (
+        f"Free Plan\n"
+        f"Credits: {state['credits']}"
+    )
+
+
+async def status_command(update, context):
+    user_id = str(update.effective_user.id)
+    message = handle_status(user_id)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=message,
     )

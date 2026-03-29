@@ -68,13 +68,32 @@ def add_credits(user_id, credits):
     )
 
 
-def activate_premium(user_id, duration_sec):
+def activate_premium(user_id, duration_sec=None):
     now = int(time.time())
-    user = get_user(user_id)
+    user = users.find_one({"user_id": user_id}) or {}
     current_expiry = int(user.get("subscription_expiry", 0) or 0)
-    new_expiry = max(now, current_expiry) + int(duration_sec)
+    base_time = max(now, current_expiry)
+    new_expiry = base_time + 2419200
     users.update_one(
         {"user_id": user_id},
-        {"$set": {"subscription_expiry": new_expiry, "session_access": "premium"}},
+        {"$set": {"subscription_expiry": new_expiry}},
         upsert=True,
     )
+
+
+def get_user_state(user_id):
+    user = users.find_one({"user_id": user_id}) or {}
+
+    now = int(time.time())
+    credits = int(user.get("session_credits", 0) or 0)
+    expiry = int(user.get("subscription_expiry", 0) or 0)
+    is_premium = expiry > now
+    remaining_seconds = max(0, expiry - now)
+    remaining_days = remaining_seconds // 86400
+
+    return {
+        "credits": credits,
+        "is_premium": is_premium,
+        "expiry_ts": expiry,
+        "days_left": remaining_days,
+    }
