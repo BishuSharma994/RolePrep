@@ -16,7 +16,7 @@ def build_plan_keyboard():
 
 
 def _has_plan_access(user_id: str, plan_type: str) -> bool:
-    if plan_type == "subscription":
+    if plan_type == "premium":   # FIX
         return is_subscription_active(user_id)
 
     if plan_type == "session":
@@ -50,7 +50,16 @@ async def start(update, context):
 async def handle_plan_selection(update, context):
     query = update.callback_query
     user_id = str(query.from_user.id)
-    plan_type = query.data.split(":", 1)[1]
+    raw_plan = query.data.split(":", 1)[1]
+
+    # === FIX: normalize plan ===
+    PLAN_MAP = {
+        "free": "free",
+        "session": "session",
+        "subscription": "premium",   # critical mapping
+    }
+
+    plan_type = PLAN_MAP.get(raw_plan)
 
     set_plan(user_id, plan_type)
     context.user_data["selected_plan"] = plan_type
@@ -77,7 +86,7 @@ async def handle_plan_selection(update, context):
     payment_result = handle_payment_request(user_id, plan_type)
     context.user_data["state"] = "AWAITING_PAYMENT"
 
-    label = "Premium" if plan_type == "subscription" else "Session Plan"
+    label = "Premium" if plan_type == "premium" else "Session Plan"
 
     await query.answer("Payment required")
     await query.edit_message_text(
