@@ -1,11 +1,10 @@
-from datetime import datetime
 import json
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from backend.handlers.payment_handler import confirm_payment
-from backend.services.db import events
 from backend.services.payment import verify_webhook_signature
+from backend.webhook_store import is_event_processed, mark_event_processed
 
 router = APIRouter()
 
@@ -52,17 +51,11 @@ async def payment_webhook(
     if not event_id:
         raise HTTPException(status_code=400, detail="missing_event_id")
 
-    existing_event = events.find_one({"event_id": event_id}, {"_id": 1})
-    if existing_event:
+    if is_event_processed(event_id):
         return {"status": "duplicate"}
 
-    events.insert_one(
-        {
-            "event_id": event_id,
-            "event": event,
-            "created_at": datetime.utcnow(),
-        }
-    )
+    if not mark_event_processed(event_id):
+        return {"status": "duplicate"}
 
     print("EVENT:", event)
 
@@ -71,6 +64,7 @@ async def payment_webhook(
     # =========================
     if event == "payment.captured":
         payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        payment_id = payment.get("id")
 
         notes = payment.get("notes", {})
         user_id = notes.get("user_id")
@@ -79,20 +73,21 @@ async def payment_webhook(
         print("USER_ID:", user_id)
         print("PLAN:", plan_type)
 
-        if not user_id or not plan_type:
+        if not user_id or not plan_type or not payment_id:
             raise HTTPException(status_code=400, detail="missing_payment_notes")
 
-        return confirm_payment(user_id, plan_type)
+        return confirm_payment(user_id, plan_type, payment_id)
 
     # =========================
     # SUBSCRIPTION FLOW
     # =========================
     elif event.startswith("subscription."):
         subscription = payload.get("payload", {}).get("subscription", {}).get("entity", {})
+        payment_id = subscription.get("id") or event_id
 
         notes = subscription.get("notes", {})
         user_id = notes.get("user_id")
-        plan_type = notes.get("plan")
+        plan_type = notes.get("plan") or "premium"
 
         print("SUB USER_ID:", user_id)
         print("SUB PLAN:", plan_type)
@@ -100,8 +95,7 @@ async def payment_webhook(
         if not user_id:
             raise HTTPException(status_code=400, detail="missing_subscription_notes")
 
-        # reuse same handler or create separate one
-        return confirm_payment(user_id, plan_type or "subscription")
+        return confirm_payment(user_id, plan_type, payment_id)
 
     # =========================
     # IGNORE EVERYTHING ELSE

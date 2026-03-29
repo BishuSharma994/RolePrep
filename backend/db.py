@@ -1,5 +1,5 @@
-import os
 from urllib.parse import quote, unquote
+
 from pymongo import MongoClient
 
 from backend.utils.env_loader import env_search_paths, get_env_value, load_environment
@@ -35,13 +35,12 @@ def normalize_mongo_uri(uri: str) -> str:
 
 client = MongoClient(normalize_mongo_uri(mongo_uri))
 db = client["roleprep"]
-
-users_col = db["users"]
-payments_col = db["payments"]
-webhooks_col = db["webhooks"]
+users = db["users"]
+payments = db["payments"]
+webhooks = db["webhooks"]
 
 
 def init_db():
-    users_col.create_index("user_id", unique=True)
-    payments_col.create_index("payment_id", unique=True)
-    webhooks_col.create_index("event_id", unique=True)
+    users.create_index("user_id", unique=True)
+    payments.create_index("payment_id", unique=True)
+    webhooks.create_index("event_id", unique=True)

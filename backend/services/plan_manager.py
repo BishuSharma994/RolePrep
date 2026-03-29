@@ -1,20 +1,13 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from backend.services.db import users
+from pymongo import ReturnDocument
+
+from backend.db import users
+from backend.user_store import activate_premium, add_credits, get_user, update_user
 
 
-def _ensure_user(user_id: str):
-    users.update_one(
-        {"user_id": user_id},
-        {
-            "$setOnInsert": {
-                "user_id": user_id,
-                "session_credits": 0,
-                "subscription_expires_at": None,
-            }
-        },
-        upsert=True,
-    )
+def _today() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%d")
 
 
 def get_user_plan(user_id: str) -> str:
@@ -26,7 +19,6 @@ def get_user_plan(user_id: str) -> str:
 
 
 def set_user_plan(user_id: str, plan: str):
-    _ensure_user(user_id)
     users.update_one(
         {"user_id": user_id},
         {"$set": {"selected_plan": plan}},
@@ -35,92 +27,122 @@ def set_user_plan(user_id: str, plan: str):
 
 
 def increment_usage(user_id: str):
-    _ensure_user(user_id)
-
-
-def get_usage(user_id: str) -> int:
-    _ensure_user(user_id)
-    return 0
-
-
-def add_session_credits(user_id: str, credits: int):
-    _ensure_user(user_id)
+    today = _today()
     users.update_one(
-        {"user_id": user_id},
-        {"$inc": {"session_credits": credits}},
-        upsert=True,
+        {
+            "user_id": user_id,
+            "session_access": "free",
+            "usage_reserved_for": today,
+        },
+        {
+            "$inc": {"daily_usage": 1},
+            "$set": {"last_active_date": today},
+            "$unset": {"usage_reserved_for": ""},
+        },
+        upsert=False,
     )
 
 
-def get_session_credits(user_id: str) -> int:
-    user = users.find_one({"user_id": user_id}, {"session_credits": 1})
-    if not user:
+def get_usage(user_id: str) -> int:
+    user = get_user(user_id)
+    today = _today()
+    if user.get("last_active_date") != today:
         return 0
+
+    return int(user.get("daily_usage", 0) or 0)
+
+
+def add_session_credits(user_id: str, credits: int):
+    add_credits(user_id, credits)
+
+
+def get_session_credits(user_id: str) -> int:
+    user = get_user(user_id)
     return int(user.get("session_credits", 0) or 0)
 
 
 def use_session_credit(user_id: str) -> bool:
-    _ensure_user(user_id)
     result = users.find_one_and_update(
         {"user_id": user_id, "session_credits": {"$gt": 0}},
         {
             "$inc": {"session_credits": -1},
             "$set": {"session_access": "credit"},
+            "$unset": {"usage_reserved_for": ""},
         },
+        return_document=ReturnDocument.AFTER,
     )
-    return result is not None
+    if result is not None:
+        return True
+
+    get_user(user_id)
+    return False
 
 
 def activate_subscription(user_id: str, days: int):
-    _ensure_user(user_id)
-    expires_at = datetime.utcnow() + timedelta(days=days)
-    users.update_one(
-        {"user_id": user_id},
-        {
-            "$set": {
-                "subscription_expires_at": expires_at,
-                "session_access": "premium",
-            }
-        },
-        upsert=True,
-    )
+    activate_premium(user_id, days * 86400)
 
 
 def is_subscription_active(user_id: str) -> bool:
-    now = datetime.utcnow()
-    user = users.find_one({"user_id": user_id}, {"subscription_expires_at": 1})
-    expiry = user.get("subscription_expires_at") if user else None
-    return bool(expiry and expiry > now)
+    now = int(datetime.utcnow().timestamp())
+    user = get_user(user_id)
+    return int(user.get("subscription_expiry", 0) or 0) > now
 
 
 def can_start_session(user_id: str) -> bool:
     if is_subscription_active(user_id):
-        _ensure_user(user_id)
         users.update_one(
             {"user_id": user_id},
-            {"$set": {"session_access": "premium"}},
+            {
+                "$set": {"session_access": "premium"},
+                "$unset": {"usage_reserved_for": ""},
+            },
             upsert=True,
         )
         return True
 
-    return use_session_credit(user_id)
+    if use_session_credit(user_id):
+        return True
+
+    today = _today()
+    result = users.find_one_and_update(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"last_active_date": {"$ne": today}},
+                {
+                    "last_active_date": today,
+                    "daily_usage": {"$lt": 1},
+                    "usage_reserved_for": {"$ne": today},
+                },
+            ],
+        },
+        {
+            "$set": {
+                "last_active_date": today,
+                "daily_usage": 0,
+                "session_access": "free",
+                "usage_reserved_for": today,
+            }
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return result is not None
 
 
 def get_current_access_mode(user_id: str) -> str:
     if is_subscription_active(user_id):
         return "premium"
 
-    user = users.find_one({"user_id": user_id}, {"session_access": 1})
-    if not user:
-        return "free"
-    return user.get("session_access", "free")
+    user = get_user(user_id)
+    return user.get("session_access") or "free"
 
 
 def clear_session_access(user_id: str):
     users.update_one(
         {"user_id": user_id},
-        {"$unset": {"session_access": ""}},
-        upsert=True,
+        {"$unset": {"session_access": "", "usage_reserved_for": ""}},
+        upsert=False,
     )
 
 
