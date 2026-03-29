@@ -1,7 +1,11 @@
-from dotenv import load_dotenv
+from backend.utils.env_loader import load_environment
 
 # MUST be first
-load_dotenv(dotenv_path="backend/.env")
+load_environment()
+
+from backend.db import init_db
+
+init_db()
 
 from contextlib import asynccontextmanager
 import uvicorn
