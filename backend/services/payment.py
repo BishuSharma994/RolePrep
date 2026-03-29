@@ -2,14 +2,18 @@ import hashlib
 import hmac
 
 import razorpay
-from backend.utils.config import RAZORPAY_KEY, RAZORPAY_SECRET, RAZORPAY_WEBHOOK_SECRET
+from backend.utils.config import (
+    RAZORPAY_KEY,
+    RAZORPAY_SECRET,
+    RAZORPAY_WEBHOOK_SECRET,
+)
 
 PLAN_PRICING = {
     "session": {
         "amount": 100,
         "description": "RolePrep Digital Interview Service",
     },
-    "subscription": {
+    "premium": {   # FIX: align naming with system
         "amount": 200,
         "description": "RolePrep Digital Interview Service",
     },
@@ -35,6 +39,7 @@ def create_payment_link(user_id, plan_type):
         raise ValueError("Unsupported plan_type")
 
     plan = PLAN_PRICING[plan_type]
+
     payment_link = client.payment_link.create(
         {
             "amount": plan["amount"],
@@ -47,8 +52,11 @@ def create_payment_link(user_id, plan_type):
             },
             "reminder_enable": True,
             "notes": {
-                "user_id": user_id,
-                "plan_type": plan_type,
+                "user_id": str(user_id),
+
+                # CRITICAL FIX ↓↓↓
+                "plan": plan_type,          # used by webhook
+                "plan_type": plan_type,     # backward compatibility
             },
         }
     )
@@ -65,4 +73,5 @@ def verify_webhook_signature(payload: bytes, signature: str) -> bool:
         payload,
         hashlib.sha256,
     ).hexdigest()
+
     return hmac.compare_digest(digest, signature)
