@@ -22,7 +22,7 @@ def merged_env_values() -> dict[str, str]:
     for env_path in ENV_CANDIDATES:
         if env_path.exists():
             values = dotenv_values(env_path)
-            merged.update({k: v for k, v in values.items() if v is not None})
+            merged.update({key: value for key, value in values.items() if value is not None})
     return merged
 
 
@@ -43,4 +43,5 @@ def get_env_value(key: str, fallback: dict[str, str] | None = None) -> str | Non
                 cleaned = config_value.strip()
                 if cleaned:
                     return cleaned
+
     return None
