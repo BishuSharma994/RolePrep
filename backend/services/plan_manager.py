@@ -1,16 +1,22 @@
 from datetime import datetime, timedelta
 
-STORE = {}
+from backend.services.db import users
 
 
-def get_today_key(user_id: str) -> str:
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    return f"{user_id}:{today}"
+def _ensure_user(user_id: str):
+    users.update_one(
+        {"user_id": user_id},
+        {
+            "$setOnInsert": {
+                "user_id": user_id,
+                "session_credits": 0,
+                "subscription_expires_at": None,
+            }
+        },
+        upsert=True,
+    )
 
 
-# =========================
-# PLAN RESOLUTION (FIXED)
-# =========================
 def get_user_plan(user_id: str) -> str:
     if is_subscription_active(user_id):
         return "premium"
@@ -20,105 +26,104 @@ def get_user_plan(user_id: str) -> str:
 
 
 def set_user_plan(user_id: str, plan: str):
-    STORE[f"{user_id}:plan"] = plan
+    _ensure_user(user_id)
+    users.update_one(
+        {"user_id": user_id},
+        {"$set": {"selected_plan": plan}},
+        upsert=True,
+    )
 
 
-# =========================
-# FREE USAGE
-# =========================
 def increment_usage(user_id: str):
-    start_mode = STORE.get(f"{user_id}:session_access")
-    if start_mode != "free":
-        return
-
-    key = get_today_key(user_id)
-    STORE[key] = STORE.get(key, 0) + 1
+    _ensure_user(user_id)
 
 
 def get_usage(user_id: str) -> int:
-    key = get_today_key(user_id)
-    return STORE.get(key, 0)
+    _ensure_user(user_id)
+    return 0
 
 
-# =========================
-# SESSION CREDITS
-# =========================
 def add_session_credits(user_id: str, credits: int):
-    key = f"{user_id}:session_credits"
-    STORE[key] = STORE.get(key, 0) + credits
+    _ensure_user(user_id)
+    users.update_one(
+        {"user_id": user_id},
+        {"$inc": {"session_credits": credits}},
+        upsert=True,
+    )
 
 
 def get_session_credits(user_id: str) -> int:
-    return STORE.get(f"{user_id}:session_credits", 0)
+    user = users.find_one({"user_id": user_id}, {"session_credits": 1})
+    if not user:
+        return 0
+    return int(user.get("session_credits", 0) or 0)
 
 
 def use_session_credit(user_id: str) -> bool:
-    key = f"{user_id}:session_credits"
-    credits = STORE.get(key, 0)
+    _ensure_user(user_id)
+    result = users.find_one_and_update(
+        {"user_id": user_id, "session_credits": {"$gt": 0}},
+        {
+            "$inc": {"session_credits": -1},
+            "$set": {"session_access": "credit"},
+        },
+    )
+    return result is not None
 
-    if credits <= 0:
-        return False
 
-    STORE[key] = credits - 1
-    return True
-
-
-# =========================
-# PREMIUM (TIME-BASED)
-# =========================
 def activate_subscription(user_id: str, days: int):
-    STORE[f"{user_id}:subscription_expires_at"] = datetime.utcnow() + timedelta(days=days)
-    STORE[f"{user_id}:plan"] = "premium"   # FIXED
+    _ensure_user(user_id)
+    expires_at = datetime.utcnow() + timedelta(days=days)
+    users.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "subscription_expires_at": expires_at,
+                "session_access": "premium",
+            }
+        },
+        upsert=True,
+    )
 
 
 def is_subscription_active(user_id: str) -> bool:
-    expiry = STORE.get(f"{user_id}:subscription_expires_at")
-
-    if not expiry:
-        return False
-
-    if expiry > datetime.utcnow():
-        return True
-
-    STORE[f"{user_id}:plan"] = "free"
-    return False
+    now = datetime.utcnow()
+    user = users.find_one({"user_id": user_id}, {"subscription_expires_at": 1})
+    expiry = user.get("subscription_expires_at") if user else None
+    return bool(expiry and expiry > now)
 
 
-# =========================
-# SESSION ENTRY CONTROL
-# =========================
 def can_start_session(user_id: str) -> bool:
-    # PREMIUM → unlimited
     if is_subscription_active(user_id):
-        STORE[f"{user_id}:session_access"] = "premium"
+        _ensure_user(user_id)
+        users.update_one(
+            {"user_id": user_id},
+            {"$set": {"session_access": "premium"}},
+            upsert=True,
+        )
         return True
 
-    # SESSION CREDIT
-    if use_session_credit(user_id):
-        STORE[f"{user_id}:session_access"] = "credit"
-        return True
-
-    # FREE LIMIT
-    if get_usage(user_id) < 1:
-        STORE[f"{user_id}:session_access"] = "free"
-        return True
-
-    return False
+    return use_session_credit(user_id)
 
 
 def get_current_access_mode(user_id: str) -> str:
     if is_subscription_active(user_id):
         return "premium"
-    return STORE.get(f"{user_id}:session_access", "free")
+
+    user = users.find_one({"user_id": user_id}, {"session_access": 1})
+    if not user:
+        return "free"
+    return user.get("session_access", "free")
 
 
 def clear_session_access(user_id: str):
-    STORE.pop(f"{user_id}:session_access", None)
+    users.update_one(
+        {"user_id": user_id},
+        {"$unset": {"session_access": ""}},
+        upsert=True,
+    )
 
 
-# =========================
-# QUESTION LIMIT CONTROL
-# =========================
 def can_ask_question(user_id: str, current_q_count: int) -> bool:
     if get_current_access_mode(user_id) == "free":
         return current_q_count < 5
