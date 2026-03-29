@@ -3,20 +3,18 @@ from backend.utils.env_loader import load_environment
 # MUST be first
 load_environment()
 
-from backend.db import init_db
-
-init_db()
-
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from backend.bot.telegram_bot import shutdown, startup
 from backend.routes.payment_webhook import router as payment_router
 from backend.routes.telegram_webhook import router as telegram_router
+from backend.services.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     await startup()
     try:
         yield

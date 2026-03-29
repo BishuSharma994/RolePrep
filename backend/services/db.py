@@ -10,6 +10,7 @@ mongo_uri = get_env_value("MONGO_URI")
 if not mongo_uri:
     raise ValueError(f"Missing MONGO_URI | searched: {env_search_paths()}")
 
+
 def normalize_mongo_uri(uri: str) -> str:
     if "://" not in uri:
         return uri
@@ -34,7 +35,11 @@ def normalize_mongo_uri(uri: str) -> str:
 client = MongoClient(normalize_mongo_uri(mongo_uri))
 db = client["roleprep"]
 users = db["users"]
-events = db["events"]
+payments = db["payments"]
+webhooks = db["webhooks"]
 
-users.create_index("user_id", unique=True)
-events.create_index("event_id", unique=True)
+
+def init_db():
+    users.create_index("user_id", unique=True)
+    payments.create_index("payment_id", unique=True)
+    webhooks.create_index("event_id", unique=True)
