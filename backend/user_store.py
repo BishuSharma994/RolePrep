@@ -1,5 +1,7 @@
 import time
 
+from pymongo.errors import DuplicateKeyError
+
 from backend.db import users
 
 
@@ -17,12 +19,13 @@ def _default_user(user_id):
 
 
 def get_user(user_id):
-    users.update_one(
-        {"user_id": user_id},
-        {"$setOnInsert": _default_user(user_id)},
-        upsert=True,
-    )
-    user = users.find_one({"user_id": user_id}) or _default_user(user_id)
+    user = users.find_one({"user_id": user_id})
+    if not user:
+        user = _default_user(user_id)
+        try:
+            users.insert_one(user)
+        except DuplicateKeyError:
+            user = users.find_one({"user_id": user_id}) or user
 
     patched_fields = {}
     default_user = _default_user(user_id)
@@ -60,10 +63,7 @@ def update_user(user):
 def add_credits(user_id, credits):
     users.update_one(
         {"user_id": user_id},
-        {
-            "$setOnInsert": _default_user(user_id),
-            "$inc": {"session_credits": int(credits)},
-        },
+        {"$inc": {"session_credits": int(credits)}},
         upsert=True,
     )
 
