@@ -1,7 +1,8 @@
 import os
 
 from backend.services.llm_engine import generate_response
-from backend.services.plan_manager import can_ask_question, can_start_session, clear_session_access, increment_usage
+from backend.db import users
+from backend.user_store import can_ask_question, can_start_session, start_session
 
 SESSIONS = {}
 
@@ -33,7 +34,8 @@ def start_interview(
     if not can_start_session(user_id):
         return {"status": "blocked", "reason": "session_limit_reached"}
 
-    increment_usage(user_id)
+    if not start_session(user_id):
+        return {"status": "blocked", "reason": "session_limit_reached"}
 
     SESSIONS[user_id] = {
         "role": role,
@@ -69,7 +71,7 @@ def handle_next_question(user_id: str, engine_fn):
         return {"status": "error", "reason": "no_active_session"}
 
     current_q_count = session.get("question_count", 0)
-    if not can_ask_question(user_id, current_q_count):
+    if not can_ask_question(user_id):
         return {"status": "blocked", "reason": "question_limit_reached"}
 
     pending_answer = session.get("pending_answer")
@@ -95,6 +97,10 @@ def end_session(user_id: str):
     if user_id in SESSIONS:
         cleanup_session_files(SESSIONS[user_id])
         del SESSIONS[user_id]
-    clear_session_access(user_id)
+    users.update_one(
+        {"user_id": user_id},
+        {"$set": {"session_access": 0, "current_session_plan": None}},
+        upsert=True,
+    )
 
     return {"status": "ended"}

@@ -2,31 +2,19 @@ import json
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from backend.handlers.payment_handler import confirm_payment
+from backend.payment_store import confirm_payment
 from backend.services.payment import verify_webhook_signature
+from backend.utils.logger import log_event
 from backend.webhook_store import is_event_processed, mark_event_processed
 
 router = APIRouter()
 
 
 def extract_event_id(payload: dict) -> str | None:
-    if payload.get("id"):
-        return str(payload["id"])
-
-    payment_id = payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
-    if payment_id:
-        return f"{payload.get('event')}:{payment_id}"
-
-    subscription_id = payload.get("payload", {}).get("subscription", {}).get("entity", {}).get("id")
-    if subscription_id:
-        return f"{payload.get('event')}:{subscription_id}"
-
-    created_at = payload.get("created_at")
-    event = payload.get("event")
-    if event and created_at is not None:
-        return f"{event}:{created_at}"
-
-    return None
+    event_id = payload.get("id")
+    if event_id is None:
+        return None
+    return str(event_id)
 
 
 @router.post("/webhook/razorpay")
@@ -51,13 +39,11 @@ async def payment_webhook(
     if not event_id:
         raise HTTPException(status_code=400, detail="missing_event_id")
 
+    log_event("webhook_received", {"event_id": event_id, "event": event})
+
     if is_event_processed(event_id):
+        log_event("webhook_duplicate", {"event_id": event_id, "event": event})
         return {"status": "duplicate"}
-
-    if not mark_event_processed(event_id):
-        return {"status": "duplicate"}
-
-    print("EVENT:", event)
 
     # =========================
     # ONE-TIME PAYMENT FLOW
@@ -68,15 +54,49 @@ async def payment_webhook(
 
         notes = payment.get("notes", {})
         user_id = notes.get("user_id")
-        plan_type = notes.get("plan")
+        plan = notes.get("plan")
 
-        print("USER_ID:", user_id)
-        print("PLAN:", plan_type)
-
-        if not user_id or not plan_type or not payment_id:
+        if not user_id or not plan or not payment_id:
             raise HTTPException(status_code=400, detail="missing_payment_notes")
 
-        return confirm_payment(user_id, plan_type, payment_id)
+        try:
+            success = confirm_payment(payment_id, user_id, plan)
+            if success:
+                if not mark_event_processed(event_id):
+                    log_event("webhook_duplicate", {"event_id": event_id, "event": event})
+                    return {"status": "duplicate"}
+                log_event(
+                    "webhook_processed",
+                    {
+                        "event_id": event_id,
+                        "payment_id": payment_id,
+                        "user_id": user_id,
+                        "plan": plan,
+                    },
+                )
+                return {"status": "processed"}
+
+            log_event(
+                "payment_duplicate",
+                {
+                    "event_id": event_id,
+                    "payment_id": payment_id,
+                    "user_id": user_id,
+                    "plan": plan,
+                },
+            )
+            return {"status": "duplicate"}
+        except Exception:
+            log_event(
+                "webhook_failed",
+                {
+                    "event_id": event_id,
+                    "payment_id": payment_id,
+                    "user_id": user_id,
+                    "plan": plan,
+                },
+            )
+            raise
 
     # =========================
     # SUBSCRIPTION FLOW
@@ -87,17 +107,52 @@ async def payment_webhook(
 
         notes = subscription.get("notes", {})
         user_id = notes.get("user_id")
-        plan_type = notes.get("plan") or "premium"
+        plan = notes.get("plan")
 
-        print("SUB USER_ID:", user_id)
-        print("SUB PLAN:", plan_type)
-
-        if not user_id:
+        if not user_id or not plan:
             raise HTTPException(status_code=400, detail="missing_subscription_notes")
 
-        return confirm_payment(user_id, plan_type, payment_id)
+        try:
+            success = confirm_payment(payment_id, user_id, plan)
+            if success:
+                if not mark_event_processed(event_id):
+                    log_event("webhook_duplicate", {"event_id": event_id, "event": event})
+                    return {"status": "duplicate"}
+                log_event(
+                    "webhook_processed",
+                    {
+                        "event_id": event_id,
+                        "payment_id": payment_id,
+                        "user_id": user_id,
+                        "plan": plan,
+                    },
+                )
+                return {"status": "processed"}
+
+            log_event(
+                "payment_duplicate",
+                {
+                    "event_id": event_id,
+                    "payment_id": payment_id,
+                    "user_id": user_id,
+                    "plan": plan,
+                },
+            )
+            return {"status": "duplicate"}
+        except Exception:
+            log_event(
+                "webhook_failed",
+                {
+                    "event_id": event_id,
+                    "payment_id": payment_id,
+                    "user_id": user_id,
+                    "plan": plan,
+                },
+            )
+            raise
 
     # =========================
     # IGNORE EVERYTHING ELSE
     # =========================
+    log_event("webhook_ignored", {"event_id": event_id, "event": event})
     return {"status": "ignored"}

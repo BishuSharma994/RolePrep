@@ -14,6 +14,7 @@ from backend.handlers.interview_handler import (
 )
 from backend.handlers.payment_handler import handle_payment_request
 from backend.handlers.plan_handler import get_plan
+from backend.rate_limit import allow_request
 from backend.services.parser import process_documents
 from backend.services.plan_manager import get_current_access_mode, get_session_credits, is_subscription_active
 from backend.utils.config import OPENAI_API_KEY
@@ -41,9 +42,9 @@ def current_question_limit(user_id: str) -> int:
 
 
 def has_selected_plan_access(user_id: str, plan_type: str) -> bool:
-    if plan_type == "subscription":
+    if plan_type == "premium":
         return is_subscription_active(user_id)
-    if plan_type == "session":
+    if plan_type in {"session", "session_10", "session_29"}:
         return get_session_credits(user_id) > 0
     return True
 
@@ -70,9 +71,14 @@ def cleanup_context_files(context):
 
 
 async def send_payment_required(message, user_id: str, selected_plan: str | None):
-    plan_type = selected_plan if selected_plan in {"session", "subscription"} else "session"
+    plan_type = selected_plan if selected_plan in {"session_10", "session_29", "premium"} else "session_10"
     payment_result = handle_payment_request(user_id, plan_type)
-    label = "Premium" if plan_type == "subscription" else "Session Plan"
+    if plan_type == "premium":
+        label = "Premium"
+    elif plan_type == "session_29":
+        label = "5 Session Pack"
+    else:
+        label = "1 Session Pack"
     await message.reply_text(
         f"{label} required to continue.\n\n"
         f"Complete payment here: {payment_result['payment_link']}\n\n"
@@ -83,6 +89,10 @@ async def send_payment_required(message, user_id: str, selected_plan: str | None
 async def interview(update, context):
     message = update.message
     user_id = str(message.from_user.id)
+    if not allow_request(user_id):
+        await message.reply_text("Too many requests. Please slow down.")
+        return
+
     text = message.text
     document = message.document
 

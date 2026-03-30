@@ -9,12 +9,16 @@ from backend.utils.config import (
 )
 
 PLAN_PRICING = {
-    "session": {
-        "amount": 100,
+    "session_10": {
+        "amount": 1000,
         "description": "RolePrep Digital Interview Service",
     },
-    "premium": {   # FIX: align naming with system
-        "amount": 200,
+    "session_29": {
+        "amount": 2900,
+        "description": "RolePrep Digital Interview Service",
+    },
+    "premium": {
+        "amount": 9900,
         "description": "RolePrep Digital Interview Service",
     },
 }
@@ -53,10 +57,7 @@ def create_payment_link(user_id, plan_type):
             "reminder_enable": True,
             "notes": {
                 "user_id": str(user_id),
-
-                # CRITICAL FIX ↓↓↓
-                "plan": plan_type,          # used by webhook
-                "plan_type": plan_type,     # backward compatibility
+                "plan": plan_type,
             },
         }
     )
