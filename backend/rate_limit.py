@@ -3,7 +3,7 @@ import time
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
-from backend.db import rate_limits
+from backend.services.db import rate_limits
 from backend.user_store import get_user, resolve_plan
 
 

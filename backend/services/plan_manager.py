@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pymongo import ReturnDocument
 
-from backend.db import users
+from backend.services.db import users
 from backend.user_store import activate_premium, add_credits, get_user, update_user
 
 

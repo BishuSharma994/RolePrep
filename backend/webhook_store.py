@@ -2,7 +2,7 @@ import time
 
 from pymongo.errors import DuplicateKeyError
 
-from backend.db import webhooks
+from backend.services.db import webhooks
 
 
 def is_event_processed(event_id):

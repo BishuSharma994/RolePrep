@@ -2,7 +2,7 @@ import time
 
 from pymongo.errors import DuplicateKeyError
 
-from backend.db import audit_logs, payments
+from backend.services.db import audit_logs, payments
 from backend.user_store import activate_premium, add_credits
 from backend.utils.logger import log_event
 

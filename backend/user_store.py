@@ -2,7 +2,7 @@ import time
 
 from pymongo.errors import DuplicateKeyError
 
-from backend.db import users
+from backend.services.db import users
 
 
 def _default_user(user_id):

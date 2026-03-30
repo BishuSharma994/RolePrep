@@ -1,7 +1,7 @@
 import os
 
 from backend.services.llm_engine import generate_response
-from backend.db import users
+from backend.services.db import users
 from backend.user_store import can_ask_question, can_start_session, start_session
 
 SESSIONS = {}
