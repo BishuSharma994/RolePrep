@@ -37,9 +37,13 @@ db = client["roleprep"]
 users = db["users"]
 payments = db["payments"]
 webhooks = db["webhooks"]
+audit_logs = db["audit_logs"]
+rate_limits = db["rate_limits"]
 
 
 def init_db():
     users.create_index("user_id", unique=True)
     payments.create_index("payment_id", unique=True)
     webhooks.create_index("event_id", unique=True)
+    audit_logs.create_index("timestamp")
+    rate_limits.create_index("user_id", unique=True)
