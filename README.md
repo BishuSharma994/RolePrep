@@ -150,3 +150,6 @@ The system now guarantees:
 - abuse protection
 
 At its current stage, the backend is a production-oriented MVP with persistent state, deterministic entitlement logic, duplicate-safe payment processing, and request-level abuse controls.
+
+
+# Test Sync new update new update new 
