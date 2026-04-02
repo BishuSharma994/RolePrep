@@ -1,7 +1,10 @@
 import os
+import time
+import uuid
 
-from backend.services.llm_engine import generate_response
 from backend.services.db import users
+from backend.services.llm_engine import generate_response
+from backend.services.session_state import clear_state, load_state, save_state
 from backend.user_store import can_ask_question, can_start_session, start_session
 
 SESSIONS = {}
@@ -21,6 +24,66 @@ def cleanup_session_files(session: dict):
         file_path = session.get(key)
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
+
+
+def _session_snapshot(session: dict) -> dict:
+    return {
+        "current_question": session.get("current_question"),
+        "current_stage": session.get("current_stage"),
+        "session_id": session.get("session_id"),
+        "last_answer": session.get("last_answer"),
+        "last_question_ts": session.get("last_question_ts"),
+        "updated_at": time.time(),
+        "session_role": session.get("role"),
+        "session_jd_text": session.get("jd_text"),
+        "session_history": list(session.get("history", [])),
+        "session_scores": list(session.get("scores", [])),
+        "session_question_count": int(session.get("question_count", 0) or 0),
+        "session_parser_data": session.get("parser_data") or {},
+        "session_resume_path": session.get("resume_path"),
+        "session_jd_path": session.get("jd_path"),
+        "session_pending_answer": session.get("pending_answer"),
+        "anti_cheat_flags": session.get("anti_cheat_flags") or {},
+        "pending_followup": session.get("pending_followup"),
+    }
+
+
+def _persist_session(user_id: str, session: dict):
+    save_state(user_id, _session_snapshot(session))
+
+
+def _restore_session_from_state(user_id: str):
+    state = load_state(user_id)
+    if not state.get("current_stage"):
+        return None
+
+    restored_session = {
+        "role": state.get("session_role", ""),
+        "jd_text": state.get("session_jd_text", ""),
+        "history": list(state.get("session_history", [])),
+        "scores": list(state.get("session_scores", [])),
+        "question_count": int(state.get("session_question_count", 0) or 0),
+        "pending_answer": state.get("session_pending_answer"),
+        "parser_data": state.get("session_parser_data") or {},
+        "resume_path": state.get("session_resume_path"),
+        "jd_path": state.get("session_jd_path"),
+        "current_question": state.get("current_question"),
+        "current_stage": state.get("current_stage"),
+        "session_id": state.get("session_id"),
+        "last_answer": state.get("last_answer"),
+        "last_question_ts": state.get("last_question_ts"),
+        "anti_cheat_flags": state.get("anti_cheat_flags") or {},
+        "pending_followup": state.get("pending_followup"),
+    }
+
+    if not restored_session["session_id"]:
+        restored_session["session_id"] = uuid.uuid4().hex
+
+    if not restored_session["role"] or not restored_session["jd_text"]:
+        return None
+
+    SESSIONS[user_id] = restored_session
+    return restored_session
 
 
 def start_interview(
@@ -47,26 +110,61 @@ def start_interview(
         "parser_data": parser_data or {},
         "resume_path": resume_path,
         "jd_path": jd_path,
+        "current_question": None,
+        "current_stage": "interview",
+        "session_id": uuid.uuid4().hex,
+        "last_answer": None,
+        "last_question_ts": None,
+        "anti_cheat_flags": {},
+        "pending_followup": None,
     }
+    _persist_session(user_id, SESSIONS[user_id])
 
     return {"status": "started"}
 
 
 def get_session(user_id: str):
-    return SESSIONS.get(user_id)
+    session = SESSIONS.get(user_id)
+    if session:
+        return session
+    return _restore_session_from_state(user_id)
+
+
+def save_session_checkpoint(user_id: str, **updates) -> bool:
+    session = get_session(user_id)
+    if not session:
+        return False
+
+    session.update(updates)
+    _persist_session(user_id, session)
+    return True
+
+
+def record_question_sent(user_id: str, question: str, stage: str = "interview", **extra_updates) -> bool:
+    updates = {
+        "current_question": question,
+        "current_stage": stage,
+        "last_question_ts": time.time(),
+        "pending_answer": None,
+    }
+    updates.update(extra_updates)
+    return save_session_checkpoint(user_id, **updates)
 
 
 def set_pending_answer(user_id: str, user_input: str) -> bool:
-    session = SESSIONS.get(user_id)
+    session = get_session(user_id)
     if not session:
         return False
 
     session["pending_answer"] = user_input
+    if session.get("current_stage") != "awaiting_followup":
+        session["last_answer"] = user_input
+    _persist_session(user_id, session)
     return True
 
 
 def handle_next_question(user_id: str, engine_fn):
-    session = SESSIONS.get(user_id)
+    session = get_session(user_id)
     if not session:
         return {"status": "error", "reason": "no_active_session"}
 
@@ -89,14 +187,18 @@ def handle_next_question(user_id: str, engine_fn):
     session["history"].append(pending_answer)
     session["scores"].append(response.get("score", 0))
     session["pending_answer"] = None
+    _persist_session(user_id, session)
 
     return {"status": "ok", "data": response}
 
 
 def end_session(user_id: str):
+    session = SESSIONS.get(user_id) or _restore_session_from_state(user_id)
+    if session:
+        cleanup_session_files(session)
     if user_id in SESSIONS:
-        cleanup_session_files(SESSIONS[user_id])
         del SESSIONS[user_id]
+    clear_state(user_id)
     users.update_one(
         {"user_id": user_id},
         {"$set": {"session_access": 0, "current_session_plan": None}},

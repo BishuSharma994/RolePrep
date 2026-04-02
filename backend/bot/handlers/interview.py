@@ -8,13 +8,21 @@ from backend.handlers.interview_handler import (
     end_session,
     get_session,
     handle_next_question,
+    record_question_sent,
     run_interview_engine,
+    save_session_checkpoint,
     set_pending_answer,
     start_interview,
 )
 from backend.handlers.payment_handler import handle_payment_request
 from backend.handlers.plan_handler import get_plan
 from backend.rate_limit import allow_request
+from backend.services.anti_cheat import (
+    analyze_response,
+    consistency_score,
+    generate_feedback,
+    generate_followup,
+)
 from backend.services.parser import process_documents
 from backend.services.plan_manager import get_current_access_mode, get_session_credits, is_subscription_active
 from backend.utils.config import OPENAI_API_KEY
@@ -182,8 +190,10 @@ async def interview(update, context):
             await message.reply_text("Unable to start interview.")
             return
 
+        initial_question = "Tell me about yourself."
+        record_question_sent(user_id, initial_question, stage="interview")
         context.user_data["state"] = "IN_INTERVIEW"
-        await message.reply_text("Interview started.\n\nTell me about yourself.")
+        await message.reply_text(f"Interview started.\n\n{initial_question}")
         return
 
     session = get_session(user_id)
@@ -192,13 +202,59 @@ async def interview(update, context):
         await message.reply_text("Use /start and select a plan first.")
         return
 
+    context.user_data["state"] = "IN_INTERVIEW"
+
     if not text:
         await message.reply_text("Reply with text to continue the interview.")
         return
 
-    if not set_pending_answer(user_id, text):
-        await message.reply_text("Use /start and select a plan first.")
-        return
+    anti_cheat_feedback = None
+    current_stage = session.get("current_stage")
+
+    if current_stage == "awaiting_followup":
+        previous_answer = session.get("last_answer", "")
+        flags = session.get("anti_cheat_flags") or {}
+        consistency = consistency_score(previous_answer, text)
+        anti_cheat_feedback = generate_feedback(flags, consistency)
+
+        if previous_answer and text.strip():
+            candidate_answer = f"{previous_answer}\n\nFollow-up clarification: {text.strip()}"
+        else:
+            candidate_answer = text.strip() or previous_answer
+
+        if not set_pending_answer(user_id, candidate_answer):
+            await message.reply_text("Use /start and select a plan first.")
+            return
+
+        save_session_checkpoint(
+            user_id,
+            anti_cheat_flags=flags,
+            pending_followup=None,
+        )
+    else:
+        flags = analyze_response(session.get("last_question_ts"), text)
+        followup = generate_followup(flags, text)
+        save_session_checkpoint(
+            user_id,
+            last_answer=text,
+            anti_cheat_flags=flags,
+            pending_followup=followup,
+        )
+
+        if followup["type"] == "trap_rephrase":
+            record_question_sent(
+                user_id,
+                followup["question"],
+                stage="awaiting_followup",
+                anti_cheat_flags=flags,
+                pending_followup=followup,
+            )
+            await message.reply_text(followup["question"])
+            return
+
+        if not set_pending_answer(user_id, text):
+            await message.reply_text("Use /start and select a plan first.")
+            return
 
     handler_result = handle_next_question(user_id, run_interview_engine)
 
@@ -357,6 +413,19 @@ Action:
         )
         return
 
+    next_question = result["next_question"]
+    record_question_sent(
+        user_id,
+        next_question,
+        stage="interview",
+        anti_cheat_flags={},
+        pending_followup=None,
+    )
+
+    response_feedback = result["feedback"]
+    if anti_cheat_feedback:
+        response_feedback = f"{anti_cheat_feedback}\n{response_feedback}"
+
     await message.reply_text(
-        f"Score: {result['score']}\n{result['feedback']}\n\nNext: {result['next_question']}"
+        f"Score: {result['score']}\n{response_feedback}\n\nNext: {next_question}"
     )
