@@ -1,4 +1,3 @@
-from backend.payment_store import confirm_payment
 from backend.services.payment import create_payment_link
 
 # ===== CONSTANT =====

@@ -39,6 +39,7 @@ payments = db["payments"]
 webhooks = db["webhooks"]
 audit_logs = db["audit_logs"]
 rate_limits = db["rate_limits"]
+feedbacks = db["feedbacks"]
 
 
 def init_db():
@@ -47,3 +48,6 @@ def init_db():
     webhooks.create_index("event_id", unique=True)
     audit_logs.create_index("timestamp")
     rate_limits.create_index("user_id", unique=True)
+    feedbacks.create_index("session_id")
+    feedbacks.create_index("user_id")
+    feedbacks.create_index("created_at")

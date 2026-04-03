@@ -4,6 +4,7 @@ import tempfile
 
 from openai import OpenAI
 
+from backend.bot.handlers.feedback import handle_feedback_comment, prompt_for_feedback
 from backend.handlers.interview_handler import (
     end_session,
     get_session,
@@ -99,6 +100,9 @@ async def interview(update, context):
     user_id = str(message.from_user.id)
     if not allow_request(user_id):
         await message.reply_text("Too many requests. Please slow down.")
+        return
+
+    if await handle_feedback_comment(update, context):
         return
 
     text = message.text
@@ -276,6 +280,7 @@ async def interview(update, context):
     if len(scores) >= 2 and scores[-1] <= 2 and scores[-2] <= 2:
         avg_score = round(sum(scores) / len(scores), 1)
         decision = map_decision(avg_score)
+        session_id = session.get("session_id")
 
         evaluation_prompt = f"""
 You are a strict hiring manager.
@@ -341,11 +346,14 @@ Action:
 {final['action']}
 """
         )
+        if session_id:
+            await prompt_for_feedback(message, context, user_id, session_id)
         return
 
     if session["question_count"] >= question_limit:
         avg_score = round(sum(scores) / len(scores), 1)
         decision = map_decision(avg_score)
+        session_id = session.get("session_id")
 
         evaluation_prompt = f"""
 You are a strict hiring manager.
@@ -411,6 +419,8 @@ Action:
 {final['action']}
 """
         )
+        if session_id:
+            await prompt_for_feedback(message, context, user_id, session_id)
         return
 
     next_question = result["next_question"]

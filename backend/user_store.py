@@ -75,7 +75,8 @@ def activate_premium(user_id, duration_sec=None):
     user = users.find_one({"user_id": user_id}) or {}
     current_expiry = int(user.get("subscription_expiry", 0) or 0)
     base_time = max(now, current_expiry)
-    new_expiry = base_time + 2419200
+    duration_sec = int(duration_sec or 2419200)
+    new_expiry = base_time + duration_sec
     users.update_one(
         {"user_id": user_id},
         {"$set": {"subscription_expiry": new_expiry}},

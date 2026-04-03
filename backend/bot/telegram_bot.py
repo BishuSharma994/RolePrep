@@ -1,6 +1,7 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
+from backend.bot.handlers.feedback import handle_feedback_rating
 from backend.bot.handlers.interview import interview
 from backend.bot.handlers.start import handle_plan_selection, policy_command, start, status_command
 from backend.utils.config import TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_URL
@@ -11,6 +12,7 @@ RUN_MODE = "polling"
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("status", status_command))
 app.add_handler(CommandHandler("policy", policy_command))
+app.add_handler(CallbackQueryHandler(handle_feedback_rating, pattern=r"^feedback_[1-5]$"))
 app.add_handler(CallbackQueryHandler(handle_plan_selection, pattern=r"^select_plan:"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, interview))
 app.add_handler(MessageHandler(filters.Document.PDF, interview))
