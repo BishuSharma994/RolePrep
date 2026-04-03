@@ -23,6 +23,8 @@ PLAN_PRICING = {
     },
 }
 
+SUPPORTED_KEY_PREFIXES = ("rzp_test_", "rzp_live_")
+
 RAZORPAY_KEY_ID = RAZORPAY_KEY
 RAZORPAY_KEY_SECRET = RAZORPAY_SECRET
 
@@ -32,8 +34,11 @@ if not RAZORPAY_KEY_ID:
 if not RAZORPAY_KEY_SECRET:
     raise ValueError("Missing RAZORPAY_SECRET or RAZORPAY_KEY_SECRET")
 
-if not RAZORPAY_KEY_ID.startswith("rzp_test_"):
-    raise ValueError("Razorpay test mode key required")
+if not RAZORPAY_KEY_ID.startswith(SUPPORTED_KEY_PREFIXES):
+    raise ValueError(
+        "Invalid Razorpay key format. Expected a key starting with "
+        "'rzp_test_' or 'rzp_live_'."
+    )
 
 client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
