@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 
+from backend.services.activity import update_user_last_active
 from backend.services.db import users
 from backend.services.session_state import clear_state, load_state, save_state
 from backend.services.llm_engine import generate_response
@@ -116,6 +117,7 @@ def start_interview(
     jd_path: str | None = None,
 ):
     user_id = str(user_id)
+    update_user_last_active(user_id)
 
     if not can_start_session(user_id):
         return {"status": "blocked", "reason": "session_limit_reached"}
@@ -186,6 +188,7 @@ def set_pending_answer(user_id: str, user_input: str) -> bool:
     if not session:
         return False
 
+    update_user_last_active(user_id)
     session["pending_answer"] = user_input
     if session.get("current_stage") != "awaiting_followup":
         session["last_answer"] = user_input
@@ -198,6 +201,7 @@ def handle_next_question(user_id: str, engine_fn):
     if not session:
         return {"status": "error", "reason": "no_active_session"}
 
+    update_user_last_active(user_id)
     current_q_count = session.get("question_count", 0)
     if not can_ask_question(user_id):
         return {"status": "blocked", "reason": "question_limit_reached"}
@@ -224,6 +228,7 @@ def handle_next_question(user_id: str, engine_fn):
 
 def end_session(user_id: str, consume_credit: bool = False):
     user_id = str(user_id)
+    update_user_last_active(user_id)
     session = SESSIONS.get(user_id) or _restore_session_from_state(user_id)
     if session:
         cleanup_session_files(session)

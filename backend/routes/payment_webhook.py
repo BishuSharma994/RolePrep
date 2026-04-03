@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 
 from backend.bot.telegram_bot import app
 from backend.payment_store import is_payment_processed, process_captured_payment
+from backend.services.activity import update_last_payment_at, update_user_last_active
 from backend.services.interview_flow import DISCLAIMER_TEXT, activate_paid_session, get_interview_entry
 from backend.services.payment import verify_webhook_signature
 from backend.utils.logger import log_event
@@ -20,6 +21,7 @@ def extract_event_id(payload: dict) -> str | None:
 
 
 async def auto_start_paid_session(user_id: str, plan: str):
+    update_user_last_active(user_id)
     activate_paid_session(user_id, plan)
     entry = get_interview_entry(user_id)
     await app.bot.send_message(chat_id=int(user_id), text="Payment received. Your interview is starting now.")
@@ -95,6 +97,8 @@ async def payment_webhook(request: Request):
         )
         return {"status": "error"}
 
+    update_user_last_active(user_id)
+
     event_already_processed = bool(event_id) and is_event_processed(event_id)
     payment_already_processed = is_payment_processed(payment_id)
 
@@ -138,6 +142,7 @@ async def payment_webhook(request: Request):
         return {"status": "error"}
 
     if processing_status == "processed":
+        update_last_payment_at(user_id)
         if event_id:
             mark_event_processed(event_id)
         try:

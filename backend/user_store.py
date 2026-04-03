@@ -1,8 +1,10 @@
 import time
+from datetime import datetime
 
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
+from backend.services.activity import increment_sessions_completed, increment_sessions_started
 from backend.services.db import users
 
 SESSION_TIMEOUT_SECONDS = 1800
@@ -22,6 +24,11 @@ def _default_user(user_id):
         "active_session_plan": None,
         "session_started_at": None,
         "last_session_activity_at": None,
+        "last_active_at": None,
+        "created_at": None,
+        "last_payment_at": None,
+        "sessions_started": 0,
+        "sessions_completed": 0,
         "bot_state": None,
         "usage_reserved_for": None,
     }
@@ -65,6 +72,11 @@ def update_user(user):
             "active_session_plan": user.get("active_session_plan"),
             "session_started_at": user.get("session_started_at"),
             "last_session_activity_at": user.get("last_session_activity_at"),
+            "last_active_at": user.get("last_active_at"),
+            "created_at": user.get("created_at"),
+            "last_payment_at": user.get("last_payment_at"),
+            "sessions_started": int(user.get("sessions_started", 0) or 0),
+            "sessions_completed": int(user.get("sessions_completed", 0) or 0),
             "bot_state": user.get("bot_state"),
             "usage_reserved_for": user.get("usage_reserved_for"),
         }
@@ -81,9 +93,16 @@ def set_user_state(user_id, state: dict):
     payload = dict(state or {})
     if not payload:
         return
+    now = datetime.utcnow()
     users.update_one(
         {"user_id": user_id},
-        {"$set": payload},
+        {
+            "$set": {
+                **payload,
+                "last_active_at": now,
+            },
+            "$setOnInsert": {"created_at": now},
+        },
         upsert=True,
     )
 
@@ -105,9 +124,14 @@ def set_bot_state(user_id, state):
 
 
 def add_credits(user_id, credits):
+    now = datetime.utcnow()
     users.update_one(
         {"user_id": str(user_id)},
-        {"$inc": {"session_credits": int(credits)}},
+        {
+            "$inc": {"session_credits": int(credits)},
+            "$set": {"last_active_at": now},
+            "$setOnInsert": {"created_at": now},
+        },
         upsert=True,
     )
 
@@ -119,9 +143,16 @@ def activate_premium(user_id, duration_sec=None):
     base_time = max(now, current_expiry)
     duration_sec = int(duration_sec or 2419200)
     new_expiry = base_time + duration_sec
+    activity_now = datetime.utcnow()
     users.update_one(
         {"user_id": str(user_id)},
-        {"$set": {"subscription_expiry": new_expiry}},
+        {
+            "$set": {
+                "subscription_expiry": new_expiry,
+                "last_active_at": activity_now,
+            },
+            "$setOnInsert": {"created_at": activity_now},
+        },
         upsert=True,
     )
 
@@ -197,14 +228,22 @@ def is_session_timed_out(user_id) -> bool:
 
 
 def touch_active_session(user_id):
+    now = datetime.utcnow()
     users.update_one(
         {"user_id": str(user_id), "active_session": True},
-        {"$set": {"last_session_activity_at": int(time.time())}},
+        {
+            "$set": {
+                "last_session_activity_at": int(time.time()),
+                "last_active_at": now,
+            },
+            "$setOnInsert": {"created_at": now},
+        },
         upsert=False,
     )
 
 
 def release_active_session(user_id):
+    now = datetime.utcnow()
     users.update_one(
         {"user_id": str(user_id)},
         {
@@ -214,11 +253,13 @@ def release_active_session(user_id):
                 "current_session_plan": None,
                 "session_access": 0,
                 "bot_state": None,
+                "last_active_at": now,
             },
             "$unset": {
                 "session_started_at": "",
                 "last_session_activity_at": "",
             },
+            "$setOnInsert": {"created_at": now},
         },
         upsert=True,
     )
@@ -227,6 +268,7 @@ def release_active_session(user_id):
 def activate_session_access(user_id, plan, bot_state=None):
     user_id = str(user_id)
     now = int(time.time())
+    activity_now = datetime.utcnow()
     active_plan = "premium" if plan == "premium" else "session"
     update = {
         "active_session": True,
@@ -236,12 +278,13 @@ def activate_session_access(user_id, plan, bot_state=None):
         "session_access": 0,
         "session_started_at": now,
         "last_session_activity_at": now,
+        "last_active_at": activity_now,
     }
     if bot_state is not None:
         update["bot_state"] = bot_state
     users.update_one(
         {"user_id": user_id},
-        {"$set": update},
+        {"$set": update, "$setOnInsert": {"created_at": activity_now}},
         upsert=True,
     )
 
@@ -274,6 +317,7 @@ def start_session(user_id):
     user_id = str(user_id)
     user = _normalize_daily_usage(user_id, get_user(user_id))
     now = int(time.time())
+    activity_now = datetime.utcnow()
 
     if user.get("active_session"):
         if is_session_timed_out(user_id):
@@ -294,12 +338,15 @@ def start_session(user_id):
                     "session_access": 0,
                     "session_started_at": now,
                     "last_session_activity_at": now,
+                    "last_active_at": activity_now,
                     "bot_state": "IN_INTERVIEW",
                     "selected_plan": "premium",
                 }
             },
             upsert=True,
         )
+        if result.acknowledged:
+            increment_sessions_started(user_id)
         return result.acknowledged
 
     if plan == "session":
@@ -313,11 +360,14 @@ def start_session(user_id):
                     "session_access": 0,
                     "session_started_at": now,
                     "last_session_activity_at": now,
+                    "last_active_at": activity_now,
                     "bot_state": "IN_INTERVIEW",
                 }
             },
             upsert=False,
         )
+        if result.modified_count == 1:
+            increment_sessions_started(user_id)
         return result.modified_count == 1
 
     if int(user.get("daily_usage", 0) or 0) >= 1:
@@ -335,12 +385,15 @@ def start_session(user_id):
                 "session_access": 0,
                 "session_started_at": now,
                 "last_session_activity_at": now,
+                "last_active_at": activity_now,
                 "bot_state": "IN_INTERVIEW",
                 "last_active_date": current_day,
             },
         },
         upsert=True,
     )
+    if result.modified_count == 1 or result.upserted_id is not None:
+        increment_sessions_started(user_id)
     return result.modified_count == 1 or result.upserted_id is not None
 
 
@@ -348,6 +401,7 @@ def complete_session(user_id):
     user_id = str(user_id)
     user = get_user(user_id)
     active_plan = user.get("active_session_plan") or user.get("current_session_plan")
+    activity_now = datetime.utcnow()
 
     if active_plan == "session" and user.get("active_session"):
         result = users.find_one_and_update(
@@ -360,6 +414,7 @@ def complete_session(user_id):
                     "current_session_plan": None,
                     "session_access": 0,
                     "bot_state": None,
+                    "last_active_at": activity_now,
                 },
                 "$unset": {
                     "session_started_at": "",
@@ -368,9 +423,12 @@ def complete_session(user_id):
             },
             return_document=ReturnDocument.AFTER,
         )
+        if result is not None:
+            increment_sessions_completed(user_id)
         return result is not None
 
     release_active_session(user_id)
+    increment_sessions_completed(user_id)
     return True
 
 

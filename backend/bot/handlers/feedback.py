@@ -1,5 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from backend.services.activity import update_user_last_active
 from backend.services.feedback import save_feedback
 
 user_state = {}
@@ -35,6 +36,7 @@ def clear_feedback_state(user_id):
 
 async def prompt_for_feedback(message, context, user_id, session_id):
     user_id = str(user_id)
+    update_user_last_active(user_id)
     context.user_data["pending_feedback_session_id"] = str(session_id)
     pending_feedback[user_id] = {"session_id": str(session_id)}
     user_state.pop(user_id, None)
@@ -47,6 +49,7 @@ async def prompt_for_feedback(message, context, user_id, session_id):
 async def handle_feedback_rating(update, context):
     query = update.callback_query
     user_id = str(query.from_user.id)
+    update_user_last_active(user_id)
     data = query.data or ""
 
     if not data.startswith("feedback_"):
@@ -74,6 +77,7 @@ async def handle_feedback_rating(update, context):
 async def handle_feedback_comment(update, context):
     message = update.message
     user_id = str(message.from_user.id)
+    update_user_last_active(user_id)
 
     if user_state.get(user_id) != "awaiting_feedback_comment":
         return False

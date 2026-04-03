@@ -44,6 +44,8 @@ feedbacks = db["feedbacks"]
 
 def init_db():
     users.create_index("user_id", unique=True)
+    users.create_index("last_active_at")
+    users.create_index("created_at")
     payments.create_index("payment_id", unique=True)
     webhooks.create_index("event_id", unique=True)
     audit_logs.create_index("timestamp")

@@ -18,6 +18,7 @@ from backend.handlers.interview_handler import (
 from backend.handlers.payment_handler import handle_payment_request
 from backend.handlers.plan_handler import get_plan
 from backend.rate_limit import allow_request
+from backend.services.activity import update_user_last_active
 from backend.services.anti_cheat import (
     analyze_response,
     consistency_score,
@@ -105,6 +106,7 @@ async def send_payment_required(message, user_id: str, selected_plan: str | None
 async def interview(update, context):
     message = update.message
     user_id = str(message.from_user.id)
+    update_user_last_active(user_id)
     if not allow_request(user_id):
         await message.reply_text("Too many requests. Please slow down.")
         return

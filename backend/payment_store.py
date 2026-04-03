@@ -3,6 +3,7 @@ import uuid
 
 from pymongo.errors import DuplicateKeyError
 
+from backend.services.activity import update_last_payment_at
 from backend.services.db import audit_logs, payments, users
 from backend.user_store import activate_premium, get_user
 from backend.utils.logger import log_event
@@ -87,6 +88,7 @@ def mark_payment_processed(payment_id, processing_token, user_id, plan, event_id
     user_id = str(user_id)
     normalized_plan = normalize_plan(plan)
     now = int(time.time())
+    update_last_payment_at(user_id)
 
     result = payments.update_one(
         {"payment_id": payment_id, "processing_token": processing_token},

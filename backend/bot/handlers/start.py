@@ -3,6 +3,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from backend.handlers.payment_handler import POLICY_URL, handle_payment_request
 from backend.handlers.plan_handler import get_plan, set_plan
 from backend.rate_limit import allow_request
+from backend.services.activity import update_user_last_active
 from backend.services.interview_flow import (
     DISCLAIMER_TEXT,
     activate_existing_access,
@@ -36,6 +37,7 @@ def _has_plan_access(user_id: str, plan_type: str) -> bool:
 
 async def start(update, context):
     user_id = str(update.effective_user.id)
+    update_user_last_active(user_id)
     if not allow_request(user_id):
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -80,6 +82,7 @@ async def start(update, context):
 async def handle_plan_selection(update, context):
     query = update.callback_query
     user_id = str(query.from_user.id)
+    update_user_last_active(user_id)
     if not allow_request(user_id):
         await query.answer("Too many requests. Please slow down.", show_alert=True)
         return
@@ -139,6 +142,7 @@ async def handle_plan_selection(update, context):
 
 async def policy_command(update, context):
     user_id = str(update.effective_user.id)
+    update_user_last_active(user_id)
     if not allow_request(user_id):
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -172,6 +176,7 @@ def handle_status(user_id):
 
 async def status_command(update, context):
     user_id = str(update.effective_user.id)
+    update_user_last_active(user_id)
     if not allow_request(user_id):
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
