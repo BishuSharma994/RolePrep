@@ -3,17 +3,23 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from backend.handlers.payment_handler import POLICY_URL, handle_payment_request
 from backend.handlers.plan_handler import get_plan, set_plan
 from backend.rate_limit import allow_request
+from backend.services.interview_flow import (
+    DISCLAIMER_TEXT,
+    activate_existing_access,
+    get_interview_entry,
+    sync_context_with_user_state,
+)
 from backend.services.plan_manager import get_session_credits, is_subscription_active
-from backend.user_store import get_user_state
+from backend.user_store import get_user, get_user_state
 
 
 def build_plan_keyboard():
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("Free Plan", callback_data="select_plan:free")],
-            [InlineKeyboardButton("1 Session ₹10", callback_data="select_plan:session_10")],
-            [InlineKeyboardButton("5 Sessions ₹29", callback_data="select_plan:session_29")],
-            [InlineKeyboardButton("Premium ₹99", callback_data="select_plan:premium")],
+            [InlineKeyboardButton("1 Session Rs10", callback_data="select_plan:session_10")],
+            [InlineKeyboardButton("5 Sessions Rs29", callback_data="select_plan:session_29")],
+            [InlineKeyboardButton("Premium Rs99", callback_data="select_plan:premium")],
         ]
     )
 
@@ -37,9 +43,22 @@ async def start(update, context):
         )
         return
 
-    selected_plan = get_plan(user_id)
-
     context.user_data.clear()
+
+    activate_existing_access(user_id)
+    user = get_user(user_id)
+
+    if user.get("active_session") or is_subscription_active(user_id) or get_session_credits(user_id) > 0:
+        activate_existing_access(user_id)
+        sync_context_with_user_state(context, user_id)
+        entry = get_interview_entry(user_id)
+        context.user_data["state"] = entry["state"]
+
+        await update.message.reply_text(DISCLAIMER_TEXT)
+        await update.message.reply_text(entry["text"])
+        return
+
+    selected_plan = get_plan(user_id)
     context.user_data["state"] = None
 
     if selected_plan:
@@ -90,11 +109,13 @@ async def handle_plan_selection(update, context):
         return
 
     if _has_plan_access(user_id, plan_type):
-        context.user_data["state"] = "ASK_ROLE"
+        activate_existing_access(user_id)
+        sync_context_with_user_state(context, user_id)
+        entry = get_interview_entry(user_id)
+        context.user_data["state"] = entry["state"]
         await query.answer("Plan unlocked")
         await query.edit_message_text(
-            "Plan already active.\n\n"
-            "Step 1: Enter the role you are applying for."
+            f"{DISCLAIMER_TEXT}\n\n{entry['text']}"
         )
         return
 
@@ -112,7 +133,7 @@ async def handle_plan_selection(update, context):
     await query.edit_message_text(
         f"{label} selected.\n\n"
         f"Complete payment here: {payment_result['payment_link']}\n\n"
-        "After successful payment confirmation, send /start and select your plan again."
+        "Your interview will start automatically after payment confirmation."
     )
 
 
@@ -138,12 +159,14 @@ def handle_status(user_id):
     if state["is_premium"]:
         return (
             f"Premium Active ({state['days_left']} days left)\n"
-            f"Credits available: {state['credits']}"
+            f"Credits available: {state['credits']}\n"
+            f"Active session: {'Yes' if state['active_session'] else 'No'}"
         )
 
     return (
         f"Free Plan\n"
-        f"Credits available: {state['credits']}"
+        f"Credits available: {state['credits']}\n"
+        f"Active session: {'Yes' if state['active_session'] else 'No'}"
     )
 
 

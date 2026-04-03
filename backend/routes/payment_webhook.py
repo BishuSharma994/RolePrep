@@ -2,7 +2,9 @@ import json
 
 from fastapi import APIRouter, Request
 
+from backend.bot.telegram_bot import app
 from backend.payment_store import is_payment_processed, process_captured_payment
+from backend.services.interview_flow import DISCLAIMER_TEXT, activate_paid_session, get_interview_entry
 from backend.services.payment import verify_webhook_signature
 from backend.utils.logger import log_event
 from backend.webhook_store import is_event_processed, mark_event_processed
@@ -15,6 +17,14 @@ def extract_event_id(payload: dict) -> str | None:
     if event_id is None:
         return None
     return str(event_id)
+
+
+async def auto_start_paid_session(user_id: str, plan: str):
+    activate_paid_session(user_id, plan)
+    entry = get_interview_entry(user_id)
+    await app.bot.send_message(chat_id=int(user_id), text="Payment received. Your interview is starting now.")
+    await app.bot.send_message(chat_id=int(user_id), text=DISCLAIMER_TEXT)
+    await app.bot.send_message(chat_id=int(user_id), text=entry["text"])
 
 
 @router.post("/webhook/razorpay")
@@ -130,6 +140,19 @@ async def payment_webhook(request: Request):
     if processing_status == "processed":
         if event_id:
             mark_event_processed(event_id)
+        try:
+            await auto_start_paid_session(str(user_id), str(plan))
+        except Exception as exc:
+            log_event(
+                "webhook_auto_start_failed",
+                {
+                    "event_id": event_id,
+                    "payment_id": payment_id,
+                    "user_id": str(user_id),
+                    "plan": plan,
+                    "error": repr(exc),
+                },
+            )
         log_event(
             "webhook_processed",
             {

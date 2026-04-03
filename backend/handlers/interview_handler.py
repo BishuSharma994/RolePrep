@@ -3,9 +3,19 @@ import time
 import uuid
 
 from backend.services.db import users
-from backend.services.llm_engine import generate_response
 from backend.services.session_state import clear_state, load_state, save_state
-from backend.user_store import can_ask_question, can_start_session, start_session
+from backend.services.llm_engine import generate_response
+from backend.user_store import (
+    can_ask_question,
+    can_start_session,
+    complete_session,
+    get_user,
+    is_session_timed_out,
+    release_active_session,
+    set_bot_state,
+    start_session,
+    touch_active_session,
+)
 
 SESSIONS = {}
 
@@ -50,6 +60,17 @@ def _session_snapshot(session: dict) -> dict:
 
 def _persist_session(user_id: str, session: dict):
     save_state(user_id, _session_snapshot(session))
+    touch_active_session(user_id)
+
+
+def _expire_session(user_id: str):
+    session = SESSIONS.get(user_id) or _restore_session_from_state(user_id)
+    if session:
+        cleanup_session_files(session)
+    if user_id in SESSIONS:
+        del SESSIONS[user_id]
+    clear_state(user_id)
+    release_active_session(user_id)
 
 
 def _restore_session_from_state(user_id: str):
@@ -94,6 +115,8 @@ def start_interview(
     resume_path: str | None = None,
     jd_path: str | None = None,
 ):
+    user_id = str(user_id)
+
     if not can_start_session(user_id):
         return {"status": "blocked", "reason": "session_limit_reached"}
 
@@ -118,12 +141,19 @@ def start_interview(
         "anti_cheat_flags": {},
         "pending_followup": None,
     }
+    set_bot_state(user_id, "IN_INTERVIEW")
     _persist_session(user_id, SESSIONS[user_id])
 
-    return {"status": "started"}
+    return {"status": "started", "session_id": SESSIONS[user_id]["session_id"]}
 
 
 def get_session(user_id: str):
+    user_id = str(user_id)
+    user = get_user(user_id)
+    if user.get("active_session") and is_session_timed_out(user_id):
+        _expire_session(user_id)
+        return None
+
     session = SESSIONS.get(user_id)
     if session:
         return session
@@ -192,16 +222,23 @@ def handle_next_question(user_id: str, engine_fn):
     return {"status": "ok", "data": response}
 
 
-def end_session(user_id: str):
+def end_session(user_id: str, consume_credit: bool = False):
+    user_id = str(user_id)
     session = SESSIONS.get(user_id) or _restore_session_from_state(user_id)
     if session:
         cleanup_session_files(session)
     if user_id in SESSIONS:
         del SESSIONS[user_id]
     clear_state(user_id)
+
+    if consume_credit:
+        complete_session(user_id)
+    else:
+        release_active_session(user_id)
+
     users.update_one(
         {"user_id": user_id},
-        {"$set": {"session_access": 0, "current_session_plan": None}},
+        {"$set": {"session_access": 0, "current_session_plan": None, "bot_state": None}},
         upsert=True,
     )
 

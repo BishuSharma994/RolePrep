@@ -24,9 +24,16 @@ from backend.services.anti_cheat import (
     generate_feedback,
     generate_followup,
 )
+from backend.services.interview_flow import (
+    DISCLAIMER_TEXT,
+    activate_existing_access,
+    get_interview_entry,
+    sync_context_with_user_state,
+)
 from backend.services.parser import process_documents
 from backend.services.plan_manager import get_current_access_mode, get_session_credits, is_subscription_active
 from backend.utils.config import OPENAI_API_KEY
+from backend.user_store import get_user, set_bot_state
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -91,7 +98,7 @@ async def send_payment_required(message, user_id: str, selected_plan: str | None
     await message.reply_text(
         f"{label} required to continue.\n\n"
         f"Complete payment here: {payment_result['payment_link']}\n\n"
-        "After successful payment confirmation, send /start and select your plan again."
+        "Your interview will start automatically after payment confirmation."
     )
 
 
@@ -108,21 +115,38 @@ async def interview(update, context):
     text = message.text
     document = message.document
 
-    selected_plan = get_plan(user_id) or context.user_data.get("selected_plan")
-    state = context.user_data.get("state")
+    activate_existing_access(user_id)
+    user = get_user(user_id)
+
+    if user.get("active_session"):
+        sync_context_with_user_state(context, user_id)
+        if get_session(user_id):
+            context.user_data["state"] = "IN_INTERVIEW"
+
+    selected_plan = context.user_data.get("selected_plan") or get_plan(user_id)
+    state = context.user_data.get("state") or user.get("bot_state")
 
     if not selected_plan:
         await message.reply_text("Use /start and select a plan first.")
         return
 
     context.user_data["selected_plan"] = selected_plan
+    if state:
+        context.user_data["state"] = state
 
     if state == "AWAITING_PAYMENT":
+        if get_user(user_id).get("active_session"):
+            entry = get_interview_entry(user_id)
+            context.user_data["state"] = entry["state"]
+            await message.reply_text(DISCLAIMER_TEXT)
+            await message.reply_text(entry["text"])
+            return
         await send_payment_required(message, user_id, selected_plan)
         return
 
-    if selected_plan != "free" and not has_selected_plan_access(user_id, selected_plan):
+    if not get_user(user_id).get("active_session") and selected_plan != "free" and not has_selected_plan_access(user_id, selected_plan):
         context.user_data["state"] = "AWAITING_PAYMENT"
+        set_bot_state(user_id, "AWAITING_PAYMENT")
         await send_payment_required(message, user_id, selected_plan)
         return
 
@@ -133,6 +157,7 @@ async def interview(update, context):
 
         context.user_data["role"] = text
         context.user_data["state"] = "ASK_RESUME"
+        set_bot_state(user_id, "ASK_RESUME")
         await message.reply_text("Step 2: Upload your resume as a PDF document.")
         return
 
@@ -144,6 +169,7 @@ async def interview(update, context):
         cleanup_temp_file(context.user_data.get("resume_path"))
         context.user_data["resume_path"] = await download_pdf(document)
         context.user_data["state"] = "ASK_JD"
+        set_bot_state(user_id, "ASK_JD")
         await message.reply_text("Step 3: Upload the JD as a PDF document.")
         return
 
@@ -186,6 +212,7 @@ async def interview(update, context):
         if start_result["status"] == "blocked":
             cleanup_context_files(context)
             context.user_data["state"] = "AWAITING_PAYMENT"
+            set_bot_state(user_id, "AWAITING_PAYMENT")
             await send_payment_required(message, user_id, selected_plan)
             return
 
@@ -197,16 +224,24 @@ async def interview(update, context):
         initial_question = "Tell me about yourself."
         record_question_sent(user_id, initial_question, stage="interview")
         context.user_data["state"] = "IN_INTERVIEW"
+        set_bot_state(user_id, "IN_INTERVIEW")
+        await message.reply_text(DISCLAIMER_TEXT)
         await message.reply_text(f"Interview started.\n\n{initial_question}")
         return
 
     session = get_session(user_id)
 
     if not session:
+        if get_user(user_id).get("active_session"):
+            entry = get_interview_entry(user_id)
+            context.user_data["state"] = entry["state"]
+            await message.reply_text(entry["text"])
+            return
         await message.reply_text("Use /start and select a plan first.")
         return
 
     context.user_data["state"] = "IN_INTERVIEW"
+    set_bot_state(user_id, "IN_INTERVIEW")
 
     if not text:
         await message.reply_text("Reply with text to continue the interview.")
@@ -265,6 +300,7 @@ async def interview(update, context):
     if handler_result["status"] == "blocked":
         end_session(user_id)
         context.user_data["state"] = "AWAITING_PAYMENT"
+        set_bot_state(user_id, "AWAITING_PAYMENT")
         await send_payment_required(message, user_id, selected_plan)
         return
 
@@ -326,7 +362,7 @@ OUTPUT JSON:
                 "action": "Build core skills",
             }
 
-        end_session(user_id)
+        end_session(user_id, consume_credit=True)
         context.user_data["state"] = None
         cleanup_context_files(context)
 
@@ -399,7 +435,7 @@ OUTPUT JSON:
                 "action": "Improve structured answers",
             }
 
-        end_session(user_id)
+        end_session(user_id, consume_credit=True)
         context.user_data["state"] = None
         cleanup_context_files(context)
 

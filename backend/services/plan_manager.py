@@ -1,9 +1,14 @@
+import time
 from datetime import datetime
 
-from pymongo import ReturnDocument
-
 from backend.services.db import users
-from backend.user_store import activate_premium, add_credits, get_user, update_user
+from backend.user_store import (
+    activate_premium,
+    add_credits,
+    get_user,
+    release_active_session,
+    set_user_state,
+)
 
 
 def _today() -> str:
@@ -11,6 +16,9 @@ def _today() -> str:
 
 
 def get_user_plan(user_id: str) -> str:
+    user = get_user(user_id)
+    if user.get("active_session"):
+        return user.get("active_session_plan") or user.get("current_session_plan") or "session"
     if is_subscription_active(user_id):
         return "premium"
     if get_session_credits(user_id) > 0:
@@ -20,7 +28,7 @@ def get_user_plan(user_id: str) -> str:
 
 def set_user_plan(user_id: str, plan: str):
     users.update_one(
-        {"user_id": user_id},
+        {"user_id": str(user_id)},
         {"$set": {"selected_plan": plan}},
         upsert=True,
     )
@@ -30,14 +38,12 @@ def increment_usage(user_id: str):
     today = _today()
     users.update_one(
         {
-            "user_id": user_id,
-            "session_access": "free",
-            "usage_reserved_for": today,
+            "user_id": str(user_id),
+            "current_session_plan": "free",
         },
         {
             "$inc": {"daily_usage": 1},
             "$set": {"last_active_date": today},
-            "$unset": {"usage_reserved_for": ""},
         },
         upsert=False,
     )
@@ -62,20 +68,29 @@ def get_session_credits(user_id: str) -> int:
 
 
 def use_session_credit(user_id: str) -> bool:
-    result = users.find_one_and_update(
-        {"user_id": user_id, "session_credits": {"$gt": 0}},
-        {
-            "$inc": {"session_credits": -1},
-            "$set": {"session_access": "credit"},
-            "$unset": {"usage_reserved_for": ""},
-        },
-        return_document=ReturnDocument.AFTER,
-    )
-    if result is not None:
+    user = get_user(user_id)
+    if user.get("active_session") and (user.get("active_session_plan") or user.get("current_session_plan")) == "session":
         return True
 
-    get_user(user_id)
-    return False
+    if int(user.get("session_credits", 0) or 0) <= 0:
+        return False
+
+    now = int(time.time())
+    result = users.update_one(
+        {"user_id": str(user_id), "session_credits": {"$gt": 0}},
+        {
+            "$set": {
+                "active_session": True,
+                "active_session_plan": "session",
+                "current_session_plan": "session",
+                "session_access": 0,
+                "session_started_at": now,
+                "last_session_activity_at": now,
+            }
+        },
+        upsert=False,
+    )
+    return result.modified_count == 1
 
 
 def activate_subscription(user_id: str, days: int):
@@ -89,14 +104,22 @@ def is_subscription_active(user_id: str) -> bool:
 
 
 def can_start_session(user_id: str) -> bool:
+    user = get_user(user_id)
+    if user.get("active_session"):
+        return True
+
     if is_subscription_active(user_id):
-        users.update_one(
-            {"user_id": user_id},
+        now = int(time.time())
+        set_user_state(
+            user_id,
             {
-                "$set": {"session_access": "premium"},
-                "$unset": {"usage_reserved_for": ""},
+                "active_session": True,
+                "active_session_plan": "premium",
+                "current_session_plan": "premium",
+                "session_started_at": now,
+                "last_session_activity_at": now,
+                "session_access": 0,
             },
-            upsert=True,
         )
         return True
 
@@ -104,46 +127,51 @@ def can_start_session(user_id: str) -> bool:
         return True
 
     today = _today()
-    result = users.find_one_and_update(
+    user = get_user(user_id)
+    if user.get("last_active_date") != today:
+        users.update_one(
+            {"user_id": str(user_id)},
+            {"$set": {"daily_usage": 0, "last_active_date": today}},
+            upsert=True,
+        )
+        user["daily_usage"] = 0
+
+    if int(user.get("daily_usage", 0) or 0) >= 1:
+        return False
+
+    now = int(time.time())
+    result = users.update_one(
+        {"user_id": str(user_id), "daily_usage": {"$lt": 1}},
         {
-            "user_id": user_id,
-            "$or": [
-                {"last_active_date": {"$ne": today}},
-                {
-                    "last_active_date": today,
-                    "daily_usage": {"$lt": 1},
-                    "usage_reserved_for": {"$ne": today},
-                },
-            ],
-        },
-        {
+            "$inc": {"daily_usage": 1},
             "$set": {
                 "last_active_date": today,
-                "daily_usage": 0,
-                "session_access": "free",
-                "usage_reserved_for": today,
-            }
+                "active_session": True,
+                "active_session_plan": "free",
+                "current_session_plan": "free",
+                "session_started_at": now,
+                "last_session_activity_at": now,
+                "session_access": 0,
+            },
         },
         upsert=True,
-        return_document=ReturnDocument.AFTER,
     )
-    return result is not None
+    return result.modified_count == 1 or result.upserted_id is not None
 
 
 def get_current_access_mode(user_id: str) -> str:
+    user = get_user(user_id)
+    if user.get("active_session"):
+        return user.get("active_session_plan") or user.get("current_session_plan") or "free"
+
     if is_subscription_active(user_id):
         return "premium"
 
-    user = get_user(user_id)
-    return user.get("session_access") or "free"
+    return user.get("current_session_plan") or "free"
 
 
 def clear_session_access(user_id: str):
-    users.update_one(
-        {"user_id": user_id},
-        {"$unset": {"session_access": "", "usage_reserved_for": ""}},
-        upsert=False,
-    )
+    release_active_session(user_id)
 
 
 def can_ask_question(user_id: str, current_q_count: int) -> bool:
