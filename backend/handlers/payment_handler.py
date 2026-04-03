@@ -1,7 +1,7 @@
 from backend.services.payment import create_payment_link
 
 # ===== CONSTANT =====
-POLICY_URL = "https://your-policy-url.com"  # keep your original URL here
+POLICY_URL = "https://www.roleprep.in/privacy"
 
 
 # =========================
