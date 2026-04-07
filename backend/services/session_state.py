@@ -21,6 +21,7 @@ SESSION_STATE_FIELDS = (
     "session_pending_answer",
     "anti_cheat_flags",
     "pending_followup",
+    "latest_answer_analysis",
 )
 
 

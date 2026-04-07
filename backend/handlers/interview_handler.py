@@ -56,6 +56,7 @@ def _session_snapshot(session: dict) -> dict:
         "session_pending_answer": session.get("pending_answer"),
         "anti_cheat_flags": session.get("anti_cheat_flags") or {},
         "pending_followup": session.get("pending_followup"),
+        "latest_answer_analysis": session.get("latest_answer_analysis"),
     }
 
 
@@ -96,6 +97,7 @@ def _restore_session_from_state(user_id: str):
         "last_question_ts": state.get("last_question_ts"),
         "anti_cheat_flags": state.get("anti_cheat_flags") or {},
         "pending_followup": state.get("pending_followup"),
+        "latest_answer_analysis": state.get("latest_answer_analysis"),
     }
 
     if not restored_session["session_id"]:
@@ -142,6 +144,7 @@ def start_interview(
         "last_question_ts": None,
         "anti_cheat_flags": {},
         "pending_followup": None,
+        "latest_answer_analysis": None,
     }
     set_bot_state(user_id, "IN_INTERVIEW")
     _persist_session(user_id, SESSIONS[user_id])
@@ -220,6 +223,7 @@ def handle_next_question(user_id: str, engine_fn):
     session["question_count"] = current_q_count + 1
     session["history"].append(pending_answer)
     session["scores"].append(response.get("score", 0))
+    session["latest_answer_analysis"] = response.get("analysis")
     session["pending_answer"] = None
     _persist_session(user_id, session)
 
