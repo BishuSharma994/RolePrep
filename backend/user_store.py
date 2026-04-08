@@ -29,7 +29,6 @@ def _default_user(user_id):
         "last_payment_at": None,
         "sessions_started": 0,
         "sessions_completed": 0,
-        "bot_state": None,
         "usage_reserved_for": None,
     }
 
@@ -77,7 +76,6 @@ def update_user(user):
             "last_payment_at": user.get("last_payment_at"),
             "sessions_started": int(user.get("sessions_started", 0) or 0),
             "sessions_completed": int(user.get("sessions_completed", 0) or 0),
-            "bot_state": user.get("bot_state"),
             "usage_reserved_for": user.get("usage_reserved_for"),
         }
     )
@@ -117,11 +115,6 @@ def clear_user_state(user_id, fields):
         {"$unset": unset_fields},
         upsert=True,
     )
-
-
-def set_bot_state(user_id, state):
-    set_user_state(str(user_id), {"bot_state": state})
-
 
 def add_credits(user_id, credits):
     now = datetime.utcnow()
@@ -175,7 +168,6 @@ def get_user_state(user_id):
         "active_session": bool(user.get("active_session")),
         "active_session_plan": user.get("active_session_plan"),
         "selected_plan": user.get("selected_plan", "free"),
-        "bot_state": user.get("bot_state"),
         "session_started_at": user.get("session_started_at"),
         "last_session_activity_at": user.get("last_session_activity_at"),
     }
@@ -252,7 +244,6 @@ def release_active_session(user_id):
                 "active_session_plan": None,
                 "current_session_plan": None,
                 "session_access": 0,
-                "bot_state": None,
                 "last_active_at": now,
             },
             "$unset": {
@@ -265,7 +256,7 @@ def release_active_session(user_id):
     )
 
 
-def activate_session_access(user_id, plan, bot_state=None):
+def activate_session_access(user_id, plan):
     user_id = str(user_id)
     now = int(time.time())
     activity_now = datetime.utcnow()
@@ -280,8 +271,6 @@ def activate_session_access(user_id, plan, bot_state=None):
         "last_session_activity_at": now,
         "last_active_at": activity_now,
     }
-    if bot_state is not None:
-        update["bot_state"] = bot_state
     users.update_one(
         {"user_id": user_id},
         {"$set": update, "$setOnInsert": {"created_at": activity_now}},
@@ -339,7 +328,6 @@ def start_session(user_id):
                     "session_started_at": now,
                     "last_session_activity_at": now,
                     "last_active_at": activity_now,
-                    "bot_state": "IN_INTERVIEW",
                     "selected_plan": "premium",
                 }
             },
@@ -361,7 +349,6 @@ def start_session(user_id):
                     "session_started_at": now,
                     "last_session_activity_at": now,
                     "last_active_at": activity_now,
-                    "bot_state": "IN_INTERVIEW",
                 }
             },
             upsert=False,
@@ -386,7 +373,6 @@ def start_session(user_id):
                 "session_started_at": now,
                 "last_session_activity_at": now,
                 "last_active_at": activity_now,
-                "bot_state": "IN_INTERVIEW",
                 "last_active_date": current_day,
             },
         },
@@ -413,7 +399,6 @@ def complete_session(user_id):
                     "active_session_plan": None,
                     "current_session_plan": None,
                     "session_access": 0,
-                    "bot_state": None,
                     "last_active_at": activity_now,
                 },
                 "$unset": {

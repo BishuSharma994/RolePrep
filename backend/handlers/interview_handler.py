@@ -13,7 +13,6 @@ from backend.user_store import (
     get_user,
     is_session_timed_out,
     release_active_session,
-    set_bot_state,
     start_session,
     touch_active_session,
 )
@@ -146,7 +145,6 @@ def start_interview(
         "pending_followup": None,
         "latest_answer_analysis": None,
     }
-    set_bot_state(user_id, "IN_INTERVIEW")
     _persist_session(user_id, SESSIONS[user_id])
 
     return {"status": "started", "session_id": SESSIONS[user_id]["session_id"]}
@@ -247,7 +245,7 @@ def end_session(user_id: str, consume_credit: bool = False):
 
     users.update_one(
         {"user_id": user_id},
-        {"$set": {"session_access": 0, "current_session_plan": None, "bot_state": None}},
+        {"$set": {"session_access": 0, "current_session_plan": None}},
         upsert=True,
     )
 

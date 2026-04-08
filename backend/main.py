@@ -7,25 +7,20 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from backend.api.audio import router as audio_router
-from backend.bot.telegram_bot import shutdown, startup
+from backend.api.sessions import router as sessions_router
 from backend.routes.payment_webhook import router as payment_router
-from backend.routes.telegram_webhook import router as telegram_router
 from backend.services.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    await startup()
-    try:
-        yield
-    finally:
-        await shutdown()
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(audio_router, prefix="/api")
-app.include_router(telegram_router)
+app.include_router(sessions_router, prefix="/api")
 app.include_router(payment_router)
 
 

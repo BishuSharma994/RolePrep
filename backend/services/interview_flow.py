@@ -27,8 +27,6 @@ def activate_paid_session(user_id: str, plan: str):
     now = int(time.time())
     raw_plan = normalize_selected_plan(plan)
     session_plan = normalize_paid_plan(raw_plan)
-    session = get_session(user_id)
-    next_state = "IN_INTERVIEW" if session else "ASK_ROLE"
 
     set_user_state(
         user_id,
@@ -40,10 +38,8 @@ def activate_paid_session(user_id: str, plan: str):
             "session_access": 0,
             "session_started_at": now,
             "last_session_activity_at": now,
-            "bot_state": next_state if session else "ASK_ROLE",
         },
     )
-    print("AUTO START SESSION:", user_id, raw_plan)
 
 
 def activate_existing_access(user_id: str):
@@ -61,36 +57,16 @@ def activate_existing_access(user_id: str):
 
 
 def get_interview_entry(user_id: str) -> dict:
-    user = get_user(user_id)
     session = get_session(user_id)
 
     if session:
         current_question = session.get("current_question") or "Reply with your answer to continue the interview."
         return {
-            "state": "IN_INTERVIEW",
+            "state": "resume_session",
             "text": f"Resuming your interview.\n\n{current_question}",
         }
 
-    bot_state = user.get("bot_state") or "ASK_ROLE"
-    if bot_state == "ASK_RESUME":
-        return {
-            "state": "ASK_RESUME",
-            "text": "Step 2: Upload your resume as a PDF document.",
-        }
-
-    if bot_state == "ASK_JD":
-        return {
-            "state": "ASK_JD",
-            "text": "Step 3: Upload the JD as a PDF document.",
-        }
-
     return {
-        "state": "ASK_ROLE",
-        "text": "Step 1: Enter the role you are applying for.",
+        "state": "create_session",
+        "text": "Create a session with POST /api/sessions.",
     }
-
-
-def sync_context_with_user_state(context, user_id: str):
-    user = get_user(user_id)
-    context.user_data["selected_plan"] = user.get("selected_plan", "free")
-    context.user_data["state"] = user.get("bot_state") or "ASK_ROLE"

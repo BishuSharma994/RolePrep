@@ -1,32 +1,78 @@
+from __future__ import annotations
+
 import json
+import time
+from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, status
 
-from backend.bot.telegram_bot import app
-from backend.payment_store import is_payment_processed, process_captured_payment
+from backend.payment_store import (
+    get_payment_record,
+    is_payment_processed,
+    process_captured_payment,
+    process_failed_payment,
+)
 from backend.services.activity import update_last_payment_at, update_user_last_active
-from backend.services.interview_flow import DISCLAIMER_TEXT, activate_paid_session, get_interview_entry
 from backend.services.payment import verify_webhook_signature
 from backend.utils.logger import log_event
-from backend.webhook_store import is_event_processed, mark_event_processed
+from backend.webhook_store import mark_event_processed, record_webhook_event, update_webhook_event
 
 router = APIRouter()
 
+_SUPPORTED_EVENTS = {"payment.captured", "payment.failed"}
 
-def extract_event_id(payload: dict) -> str | None:
+
+def extract_event_id(payload: dict[str, Any]) -> str | None:
     event_id = payload.get("id")
     if event_id is None:
         return None
     return str(event_id)
 
 
-async def auto_start_paid_session(user_id: str, plan: str):
-    update_user_last_active(user_id)
-    activate_paid_session(user_id, plan)
-    entry = get_interview_entry(user_id)
-    await app.bot.send_message(chat_id=int(user_id), text="Payment received. Your interview is starting now.")
-    await app.bot.send_message(chat_id=int(user_id), text=DISCLAIMER_TEXT)
-    await app.bot.send_message(chat_id=int(user_id), text=entry["text"])
+def _payment_entity(payload: dict[str, Any]) -> dict[str, Any]:
+    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
+    return payment if isinstance(payment, dict) else {}
+
+
+def _payment_metadata(payment: dict[str, Any]) -> dict[str, Any]:
+    notes = payment.get("notes", {}) or {}
+    if not isinstance(notes, dict):
+        notes = {}
+    return {
+        "payment_id": str(payment.get("id") or ""),
+        "payment_status": str(payment.get("status") or ""),
+        "user_id": str(notes.get("user_id") or ""),
+        "plan": str(notes.get("plan") or ""),
+        "email": str(payment.get("email") or ""),
+        "contact": str(payment.get("contact") or ""),
+        "notes": notes,
+    }
+
+
+def _resolve_payment_context(payment_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    resolved = dict(metadata)
+    if payment_id and (not resolved.get("user_id") or not resolved.get("plan")):
+        payment_record = get_payment_record(payment_id) or {}
+        resolved["user_id"] = str(resolved.get("user_id") or payment_record.get("user_id") or "")
+        resolved["plan"] = str(
+            resolved.get("plan")
+            or payment_record.get("raw_plan")
+            or payment_record.get("plan")
+            or ""
+        )
+    return resolved
+
+
+def _duplicate_response(event_id: str, event: str, payment_id: str, user_id: str | None, plan: str | None):
+    return {
+        "status": "ignored",
+        "reason": "duplicate",
+        "event_id": event_id,
+        "event": event,
+        "payment_id": payment_id,
+        "user_id": user_id,
+        "plan": plan,
+    }
 
 
 @router.post("/webhook/razorpay")
@@ -34,43 +80,62 @@ async def payment_webhook(request: Request):
     raw_body = await request.body()
     signature = request.headers.get("x-razorpay-signature")
 
+    if not signature:
+        log_event("webhook_signature_missing", {"signature_present": False})
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Razorpay signature")
+
     try:
-        if not signature or not verify_webhook_signature(raw_body, signature):
-            log_event(
-                "webhook_signature_failed",
-                {
-                    "signature_present": bool(signature),
-                },
-            )
-            return {"status": "invalid"}
+        is_valid_signature = verify_webhook_signature(raw_body, signature)
     except Exception as exc:
         log_event(
-            "webhook_signature_failed",
+            "webhook_signature_verification_failed",
             {
-                "signature_present": bool(signature),
+                "signature_present": True,
                 "error": repr(exc),
             },
         )
-        return {"status": "invalid"}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook verification failed") from exc
+
+    if not is_valid_signature:
+        log_event("webhook_signature_invalid", {"signature_present": True})
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Razorpay signature")
 
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except json.JSONDecodeError as exc:
         log_event("webhook_payload_invalid", {"error": repr(exc)})
-        return {"status": "error"}
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook payload") from exc
 
-    event = payload.get("event")
-    if event != "payment.captured":
-        log_event("webhook_ignored", {"event": event})
-        return {"status": "ignored"}
+    if not isinstance(payload, dict):
+        log_event("webhook_payload_invalid", {"error": "payload_not_object"})
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook payload must be a JSON object")
 
-    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
-    payment_id = payment.get("id")
-    status = payment.get("status")
-    notes = payment.get("notes", {}) or {}
-    user_id = notes.get("user_id")
-    plan = notes.get("plan")
-    event_id = extract_event_id(payload) or str(payment_id or "")
+    event_id = extract_event_id(payload)
+    if not event_id:
+        log_event("webhook_event_id_missing", {"payload": payload})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing webhook event id")
+
+    event = str(payload.get("event") or "")
+    record_status = record_webhook_event(event_id, event, payload)
+    if record_status == "duplicate":
+        log_event("webhook_duplicate", {"event_id": event_id, "event": event})
+        return _duplicate_response(event_id, event, "", None, None)
+
+    if event not in _SUPPORTED_EVENTS:
+        update_webhook_event(event_id, "ignored", error="unsupported_event")
+        log_event("webhook_ignored", {"event_id": event_id, "event": event})
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Unsupported webhook event: {event}")
+
+    payment = _payment_entity(payload)
+    metadata = _resolve_payment_context(
+        str(payment.get("id") or ""),
+        _payment_metadata(payment),
+    )
+    payment_id = metadata["payment_id"]
+    payment_status = metadata["payment_status"]
+    user_id = metadata["user_id"]
+    plan = metadata["plan"]
+    received_at = int(time.time())
 
     log_event(
         "webhook_received",
@@ -78,118 +143,161 @@ async def payment_webhook(request: Request):
             "event_id": event_id,
             "event": event,
             "payment_id": payment_id,
-            "payment_status": status,
-            "user_id": str(user_id) if user_id is not None else None,
-            "plan": plan,
+            "payment_status": payment_status,
+            "user_id": user_id or None,
+            "plan": plan or None,
+            "received_at": received_at,
+            "record_status": record_status,
         },
     )
 
-    if not payment_id or status != "captured" or not user_id or not plan:
-        log_event(
-            "webhook_validation_failed",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "payment_status": status,
-                "user_id": str(user_id) if user_id is not None else None,
-                "plan": plan,
-            },
-        )
-        return {"status": "error"}
+    if not payment_id:
+        update_webhook_event(event_id, "validation_failed", error="missing_payment_id")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing payment id")
 
-    update_user_last_active(user_id)
+    if event == "payment.captured":
+        if payment_status != "captured" or not user_id or not plan:
+            update_webhook_event(
+                event_id,
+                "validation_failed",
+                payment_id=payment_id,
+                payment_status=payment_status,
+                user_id=user_id or None,
+                plan=plan or None,
+                error="invalid_captured_payment_payload",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Captured payment webhook is missing required payment metadata",
+            )
 
-    event_already_processed = bool(event_id) and is_event_processed(event_id)
-    payment_already_processed = is_payment_processed(payment_id)
+        update_user_last_active(user_id)
 
-    if event_already_processed and payment_already_processed:
-        log_event(
-            "webhook_duplicate",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "user_id": str(user_id),
-                "plan": plan,
-                "reason": "event_and_payment_already_processed",
-            },
-        )
-        return {"status": "duplicate"}
-
-    if event_already_processed and not payment_already_processed:
-        log_event(
-            "webhook_recovery_attempt",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "user_id": str(user_id),
-                "plan": plan,
-            },
-        )
-
-    try:
-        processing_status = process_captured_payment(payment_id, user_id, plan, event_id)
-    except Exception as exc:
-        log_event(
-            "webhook_processing_failed",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "user_id": str(user_id),
-                "plan": plan,
-                "error": repr(exc),
-            },
-        )
-        return {"status": "error"}
-
-    if processing_status == "processed":
-        update_last_payment_at(user_id)
-        if event_id:
-            mark_event_processed(event_id)
-        try:
-            await auto_start_paid_session(str(user_id), str(plan))
-        except Exception as exc:
+        if is_payment_processed(payment_id):
+            update_webhook_event(
+                event_id,
+                "processed",
+                payment_id=payment_id,
+                user_id=user_id,
+                plan=plan,
+                reason="payment_already_processed",
+            )
             log_event(
-                "webhook_auto_start_failed",
+                "webhook_duplicate",
                 {
                     "event_id": event_id,
+                    "event": event,
                     "payment_id": payment_id,
-                    "user_id": str(user_id),
+                    "user_id": user_id,
+                    "plan": plan,
+                    "reason": "payment_already_processed",
+                },
+            )
+            return _duplicate_response(event_id, event, payment_id, user_id, plan)
+
+        try:
+            processing_status = process_captured_payment(payment_id, user_id, plan, event_id)
+        except Exception as exc:
+            update_webhook_event(
+                event_id,
+                "failed",
+                payment_id=payment_id,
+                user_id=user_id,
+                plan=plan,
+                error=repr(exc),
+            )
+            log_event(
+                "webhook_processing_failed",
+                {
+                    "event_id": event_id,
+                    "event": event,
+                    "payment_id": payment_id,
+                    "user_id": user_id,
                     "plan": plan,
                     "error": repr(exc),
                 },
             )
-        log_event(
-            "webhook_processed",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "user_id": str(user_id),
-                "plan": plan,
-            },
-        )
-        return {"status": "success"}
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process payment") from exc
 
-    if processing_status in {"duplicate", "in_progress"}:
-        log_event(
-            "webhook_duplicate",
-            {
-                "event_id": event_id,
-                "payment_id": payment_id,
-                "user_id": str(user_id),
-                "plan": plan,
-                "reason": processing_status,
-            },
-        )
-        return {"status": "duplicate"}
+        if processing_status != "processed":
+            update_webhook_event(
+                event_id,
+                "failed",
+                payment_id=payment_id,
+                user_id=user_id,
+                plan=plan,
+                error=f"unexpected_processing_status:{processing_status}",
+            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected payment processing status")
 
-    log_event(
-        "webhook_processing_failed",
-        {
+        update_last_payment_at(user_id)
+        mark_event_processed(
+            event_id,
+            event_type=event,
+            payment_id=payment_id,
+            user_id=user_id,
+            plan=plan,
+            processed_event="payment.captured",
+        )
+        return {
+            "status": "processed",
             "event_id": event_id,
+            "event": event,
             "payment_id": payment_id,
-            "user_id": str(user_id),
+            "user_id": user_id,
             "plan": plan,
-            "error": f"unexpected_processing_status:{processing_status}",
-        },
+        }
+
+    failure_reason = (
+        payment.get("error_description")
+        or payment.get("description")
+        or payload.get("description")
+        or "payment.failed"
     )
-    return {"status": "error"}
+    try:
+        process_failed_payment(
+            payment_id=payment_id,
+            user_id=user_id or None,
+            plan=plan or None,
+            event_id=event_id,
+            error_message=str(failure_reason),
+        )
+    except Exception as exc:
+        update_webhook_event(
+            event_id,
+            "failed",
+            payment_id=payment_id,
+            user_id=user_id or None,
+            plan=plan or None,
+            error=repr(exc),
+        )
+        log_event(
+            "webhook_processing_failed",
+            {
+                "event_id": event_id,
+                "event": event,
+                "payment_id": payment_id,
+                "user_id": user_id or None,
+                "plan": plan or None,
+                "error": repr(exc),
+            },
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to record failed payment") from exc
+
+    mark_event_processed(
+        event_id,
+        event_type=event,
+        payment_id=payment_id,
+        user_id=user_id or None,
+        plan=plan or None,
+        processed_event="payment.failed",
+        failure_reason=str(failure_reason),
+    )
+    return {
+        "status": "processed",
+        "event_id": event_id,
+        "event": event,
+        "payment_id": payment_id,
+        "user_id": user_id or None,
+        "plan": plan or None,
+    }

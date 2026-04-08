@@ -36,6 +36,22 @@ def is_payment_processed(payment_id):
     return payment is not None and payment.get("status") == "processed"
 
 
+def get_payment_record(payment_id):
+    return payments.find_one(
+        {"payment_id": str(payment_id)},
+        {
+            "_id": 0,
+            "payment_id": 1,
+            "user_id": 1,
+            "plan": 1,
+            "raw_plan": 1,
+            "status": 1,
+            "event_id": 1,
+            "last_error": 1,
+        },
+    )
+
+
 def add_sessions(user_id, count):
     user_id = str(user_id)
     count = int(count)
@@ -156,6 +172,65 @@ def mark_payment_failed(payment_id, processing_token, error_message, event_id=No
     )
     if not result.acknowledged or result.matched_count != 1:
         raise RuntimeError(f"Failed to mark payment {payment_id} as failed")
+
+
+def process_failed_payment(payment_id, user_id=None, plan=None, event_id=None, error_message="payment.failed"):
+    payment_id = str(payment_id or "")
+    user_id_value = str(user_id) if user_id is not None else None
+    raw_plan = str(plan) if plan is not None else None
+    normalized_plan = None
+    if raw_plan:
+        try:
+            normalized_plan = normalize_plan(raw_plan)
+        except ValueError:
+            normalized_plan = raw_plan
+
+    now = int(time.time())
+    result = payments.update_one(
+        {"payment_id": payment_id},
+        {
+            "$set": {
+                "status": "failed",
+                "user_id": user_id_value,
+                "plan": normalized_plan,
+                "raw_plan": raw_plan,
+                "event_id": str(event_id) if event_id else None,
+                "last_error": str(error_message),
+                "updated_at": now,
+            },
+            "$setOnInsert": {
+                "created_at": now,
+            },
+        },
+        upsert=True,
+    )
+    if not result.acknowledged:
+        raise RuntimeError(f"Failed to record failed payment {payment_id}")
+
+    audit_logs.insert_one(
+        {
+            "type": "payment_failed",
+            "user_id": user_id_value,
+            "payment_id": payment_id,
+            "plan": normalized_plan,
+            "raw_plan": raw_plan,
+            "event_id": str(event_id) if event_id else None,
+            "error": str(error_message),
+            "timestamp": now,
+        }
+    )
+    log_event(
+        "payment_failed",
+        {
+            "payment_id": payment_id,
+            "user_id": user_id_value,
+            "plan": normalized_plan,
+            "raw_plan": raw_plan,
+            "event_id": str(event_id) if event_id else None,
+            "error": str(error_message),
+        },
+    )
+    return "processed"
 
 
 def _claim_payment(payment_id, user_id, plan, event_id=None):

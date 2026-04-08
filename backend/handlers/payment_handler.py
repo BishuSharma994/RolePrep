@@ -5,7 +5,7 @@ POLICY_URL = "https://www.roleprep.in/privacy"
 
 
 # =========================
-# PAYMENT REQUEST (called from bot)
+# PAYMENT REQUEST
 # =========================
 def handle_payment_request(user_id: str, plan_type: str):
     payment_link = create_payment_link(user_id, plan_type)
