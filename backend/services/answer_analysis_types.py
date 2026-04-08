@@ -190,6 +190,7 @@ class ScoreBreakdown:
     specificity: ScoreDetail
     clarity: ScoreDetail
     relevance: ScoreDetail
+    delivery: ScoreDetail
     total: int
 
     def to_dict(self) -> dict[str, Any]:

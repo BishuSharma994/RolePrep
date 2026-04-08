@@ -150,6 +150,54 @@ def _detect_filler_issue(sentence_signals: SentenceSignals) -> SentenceIssue | N
     )
 
 
+def _voice_signals_from_context(context) -> dict[str, int | float]:
+    parser_data = getattr(context, "parser_data", {}) or {}
+    voice_signals = parser_data.get("voice_signals", {})
+    if isinstance(voice_signals, dict):
+        return voice_signals
+    return {}
+
+
+def _build_voice_issues(context) -> list[SentenceIssue]:
+    voice_signals = _voice_signals_from_context(context)
+    issues: list[SentenceIssue] = []
+
+    filler_count = int(voice_signals.get("filler_count", 0) or 0)
+    if filler_count > 3:
+        issues.append(
+            _build_issue(
+                "too_many_fillers",
+                f"Delivery is cluttered with {filler_count} filler words. The answer sounds hesitant instead of controlled.",
+                "medium",
+                "Cut filler phrases and pause silently before the next point.",
+            )
+        )
+
+    speech_rate = float(voice_signals.get("speech_rate", 0.0) or 0.0)
+    if 0.0 < speech_rate < 1.5:
+        issues.append(
+            _build_issue(
+                "low_speech_rate",
+                f"Speech rate is only {speech_rate:.2f} words per second. The delivery drags and loses force.",
+                "medium",
+                "Tighten the answer and keep a steadier pace through the core example.",
+            )
+        )
+
+    long_pauses = int(voice_signals.get("long_pauses", 0) or 0)
+    if long_pauses > 2:
+        issues.append(
+            _build_issue(
+                "long_pauses",
+                f"There are {long_pauses} long pauses over 1.2 seconds. The delivery sounds uncertain.",
+                "medium",
+                "Shorten dead air and group ideas into fewer, cleaner beats.",
+            )
+        )
+
+    return issues
+
+
 def detect_failures(
     sentences: list[StructuredSentence],
     signals: ExtractedSignals,
@@ -173,6 +221,9 @@ def detect_failures(
             issue = detector(sentence_signals)
             if issue is not None:
                 issues.append(issue)
+
+        if sentence.index == 0:
+            issues.extend(_build_voice_issues(context))
 
         failures.append(
             SentenceFailure(

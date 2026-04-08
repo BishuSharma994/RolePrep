@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from backend.services.answer_analysis_types import AnswerAnalysisRequest
 from backend.services.answer_failure_engine import analyze_answer
 from backend.services.stt_service import STTService
+from backend.services.voice_signal_extractor import extract_voice_signals
 
 router = APIRouter()
 TMP_AUDIO_DIR = Path("tmp_audio")
@@ -34,18 +35,27 @@ async def analyze_audio(
             shutil.copyfileobj(file.file, output_stream)
 
         stt_result = STTService().transcribe(temp_path)
+        transcript = str(stt_result.get("transcript") or "")
+        segments = list(stt_result.get("segments") or [])
+        voice_analysis = extract_voice_signals(segments, transcript)
         request = AnswerAnalysisRequest(
             role=str(role or ""),
             jd_text=str(jd_text or ""),
             current_question=str(current_question or ""),
-            answer_text=str(stt_result.get("transcript") or ""),
+            answer_text=transcript,
+            parser_data={"voice_signals": voice_analysis},
         )
         analysis = analyze_answer(request)
+        content_analysis = analysis.to_dict()
 
         return {
-            "transcript": stt_result.get("transcript", ""),
-            "segments": stt_result.get("segments", []),
-            "analysis": analysis.to_dict(),
+            "transcript": transcript,
+            "segments": segments,
+            "analysis": {
+                **content_analysis,
+                "content": content_analysis,
+                "voice": voice_analysis,
+            },
             "audio_metrics": {
                 "pause_count": int(stt_result.get("pause_count", 0) or 0),
                 "avg_pause": float(stt_result.get("avg_pause", 0.0) or 0.0),

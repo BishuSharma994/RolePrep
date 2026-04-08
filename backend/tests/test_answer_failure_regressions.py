@@ -6,7 +6,7 @@ from backend.services.answer_failure_engine import analyze_answer
 
 class AnswerFailureRegressionTests(unittest.TestCase):
     def test_regression_sample_produces_multiple_failures(self):
-        answer = "I worked on improving team processes and helped increase efficiency."
+        answer = "I worked on improving processes and helped increase efficiency"
         request = AnswerAnalysisRequest(
             role="Backend Engineer",
             jd_text="Drive operational efficiency, ownership, and measurable impact.",
@@ -26,7 +26,7 @@ class AnswerFailureRegressionTests(unittest.TestCase):
         self.assertIn("'helped'", " ".join(issue.reason for issue in issues))
 
     def test_regression_sample_feedback_is_harsh_not_generic(self):
-        answer = "I worked on improving team processes and helped increase efficiency."
+        answer = "I worked on improving processes and helped increase efficiency"
         request = AnswerAnalysisRequest(
             role="Backend Engineer",
             jd_text="Drive operational efficiency, ownership, and measurable impact.",
@@ -43,7 +43,7 @@ class AnswerFailureRegressionTests(unittest.TestCase):
         self.assertNotIn("improve clarity", summary)
 
     def test_regression_sample_followup_demands_impact_and_specifics(self):
-        answer = "I worked on improving team processes and helped increase efficiency."
+        answer = "I worked on improving processes and helped increase efficiency"
         request = AnswerAnalysisRequest(
             role="Backend Engineer",
             jd_text="Drive operational efficiency, ownership, and measurable impact.",
@@ -58,9 +58,11 @@ class AnswerFailureRegressionTests(unittest.TestCase):
         self.assertIn("no_metric", followup.triggered_by)
         self.assertIn("vague", followup.triggered_by)
         self.assertIn("weak_ownership", followup.triggered_by)
+        self.assertIn("no_impact", followup.triggered_by)
         self.assertIn("numbers", question)
         self.assertIn("exact action", question)
         self.assertIn("personally own", question)
+        self.assertIn("outcome", question)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ class AudioEndpointTests(unittest.TestCase):
         mock_transcribe.return_value = {
             "transcript": "I reduced latency by 30%.",
             "segments": [
-                {"start": 0.0, "end": 1.0, "text": "I reduced latency by 30%."},
+                {"start": 0.0, "end": 3.0, "text": "I reduced latency by 30%."},
             ],
             "pauses": [],
             "pause_count": 0,
@@ -47,6 +47,8 @@ class AudioEndpointTests(unittest.TestCase):
         self.assertEqual(payload["transcript"], "I reduced latency by 30%.")
         self.assertEqual(payload["segments"][0]["text"], "I reduced latency by 30%.")
         self.assertEqual(payload["analysis"]["overall_score_100"], 82)
+        self.assertEqual(payload["analysis"]["content"]["overall_score_100"], 82)
+        self.assertEqual(payload["analysis"]["voice"]["filler_count"], 0)
         self.assertEqual(payload["audio_metrics"]["pause_count"], 0)
 
 

@@ -25,6 +25,13 @@ def _issue_counts(failures: list[SentenceFailure] | None) -> Counter[str]:
     return counts
 
 
+def _voice_signals(context: AnswerAnalysisRequest) -> dict[str, int | float]:
+    voice_signals = (context.parser_data or {}).get("voice_signals", {})
+    if isinstance(voice_signals, dict):
+        return voice_signals
+    return {}
+
+
 def score_structure(sentences: list[StructuredSentence], structure: AnswerStructure) -> ScoreDetail:
     if not sentences:
         return ScoreDetail(name="structure", score=0, reason="No usable answer structure.")
@@ -161,6 +168,34 @@ def score_relevance(signals: ExtractedSignals, context: AnswerAnalysisRequest) -
     )
 
 
+def score_delivery(context: AnswerAnalysisRequest, failures: list[SentenceFailure] | None = None) -> ScoreDetail:
+    voice_signals = _voice_signals(context)
+    issue_counts = _issue_counts(failures)
+    score = 25
+    reasons: list[str] = []
+
+    filler_count = int(voice_signals.get("filler_count", 0) or 0)
+    if filler_count > 3 or issue_counts["too_many_fillers"] > 0:
+        score -= 5
+        reasons.append("Too many fillers weaken delivery.")
+
+    long_pauses = int(voice_signals.get("long_pauses", 0) or 0)
+    if long_pauses > 2 or issue_counts["long_pauses"] > 0:
+        score -= 5
+        reasons.append("Long pauses break momentum.")
+
+    speech_rate = float(voice_signals.get("speech_rate", 0.0) or 0.0)
+    if 0.0 < speech_rate < 1.5 or issue_counts["low_speech_rate"] > 0:
+        score -= 5
+        reasons.append("Speech rate is too slow.")
+
+    return ScoreDetail(
+        name="delivery",
+        score=_clamp_score(score),
+        reason=" ".join(reasons) if reasons else "Delivery supports the answer.",
+    )
+
+
 def score_answer(
     sentences: list[StructuredSentence],
     structure: AnswerStructure,
@@ -172,13 +207,17 @@ def score_answer(
     specificity_score = score_specificity(signals, failures=failures)
     clarity_score = score_clarity(sentences, signals, failures=failures)
     relevance_score = score_relevance(signals, context)
-    total = structure_score.score + specificity_score.score + clarity_score.score + relevance_score.score
+    delivery_score = score_delivery(context, failures=failures)
+    content_score = structure_score.score + specificity_score.score + clarity_score.score + relevance_score.score
+    normalized_content_score = round((content_score / 100) * 75)
+    total = normalized_content_score + delivery_score.score
 
     return ScoreBreakdown(
         structure=structure_score,
         specificity=specificity_score,
         clarity=clarity_score,
         relevance=relevance_score,
+        delivery=delivery_score,
         total=max(0, min(100, total)),
     )
 

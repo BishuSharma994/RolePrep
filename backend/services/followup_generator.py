@@ -61,7 +61,7 @@ def generate_followup(
         triggered_by.append("weak_ownership")
         prompts.append("Separate your work from the team's. What did you personally own?")
 
-    if signals.impact_count == 0 or "no_impact" in failure_issue_types:
+    if signals.impact_count == 0 or "no_impact" in failure_issue_types or "no_metric" in failure_issue_types:
         triggered_by.append("no_impact")
         prompts.append("Finish the story. What business or technical outcome did your action create?")
 
