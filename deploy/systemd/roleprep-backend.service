@@ -1,0 +1,17 @@
+[Unit]
+Description=RolePrep FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/RolePrep
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/RolePrep/backend/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=*
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
