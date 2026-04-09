@@ -60,6 +60,21 @@ def _resolve_request_user_id(user_id: str | None, authorization: str | None) -> 
         raise
 
 
+def _require_paid_resume_access(user_id: str) -> None:
+    from backend.user_store import get_user, resolve_plan
+
+    plan = resolve_plan(get_user(user_id))
+    if plan == "free":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "RESUME_PLAN_REQUIRED",
+                "reason": "resume_access_requires_paid_plan",
+                "message": "Resume generation is available only on paid plans.",
+            },
+        )
+
+
 def _parse_jd(jd_text: str) -> dict[str, Any]:
     from backend.services.jd_parser import parse_jd
 
@@ -232,6 +247,7 @@ async def generate_resume(payload: ResumeGenerateRequest, request: Request):
         authorization=request.headers.get("authorization"),
         fallback_user_id=session_source.get("user_id"),
     )
+    _require_paid_resume_access(user_id)
     raw_text = str(payload.raw_text or session_source.get("raw_text") or "").strip()
     if not raw_text:
         raise HTTPException(status_code=400, detail="Missing raw_text source")
@@ -255,6 +271,7 @@ async def improve_resume(payload: ResumeImproveRequest, request: Request):
         authorization=request.headers.get("authorization"),
         fallback_user_id=session_source.get("user_id"),
     )
+    _require_paid_resume_access(user_id)
     jd_data = _parse_jd(jd_text)
 
     if payload.resume_json:
@@ -286,6 +303,7 @@ async def get_resume(user_id: str, request: Request):
         requested_user_id=user_id,
         authorization=request.headers.get("authorization"),
     )
+    _require_paid_resume_access(resolved_user_id)
     document = _get_resumes_collection().find_one(
         {"user_id": resolved_user_id},
         sort=[("created_at", -1)],

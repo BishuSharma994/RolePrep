@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -36,10 +37,12 @@ class ResumeApiTests(unittest.TestCase):
     @patch("backend.api.resume._build_resume")
     @patch("backend.api.resume._resume_input_from_text")
     @patch("backend.api.resume._parse_jd")
+    @patch("backend.api.resume._require_paid_resume_access")
     @patch("backend.api.resume._normalize_resume_user_id")
     def test_generate_resume_returns_json_and_pdf(
         self,
         mock_normalize_user_id,
+        mock_require_paid_resume_access,
         mock_parse_jd,
         mock_resume_input,
         mock_build_resume,
@@ -75,10 +78,12 @@ class ResumeApiTests(unittest.TestCase):
         self.assertEqual(payload["content_type"], "application/pdf")
         self.assertEqual(base64.b64decode(payload["pdf_base64"]), b"%PDF-test")
         self.assertEqual(len(fake_collection.inserted), 1)
+        mock_require_paid_resume_access.assert_called_once_with("user-123")
 
     @patch("backend.api.resume._generate_pdf")
+    @patch("backend.api.resume._require_paid_resume_access")
     @patch("backend.api.resume._normalize_resume_user_id")
-    def test_get_resume_returns_latest_resume(self, mock_normalize_user_id, mock_generate_pdf):
+    def test_get_resume_returns_latest_resume(self, mock_normalize_user_id, mock_require_paid_resume_access, mock_generate_pdf):
         fake_collection = _FakeResumeCollection()
         fake_collection.document = {
             "user_id": "user-123",
@@ -101,6 +106,50 @@ class ResumeApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["user_id"], "user-123")
         self.assertEqual(base64.b64decode(payload["pdf_base64"]), b"%PDF-test")
+        mock_require_paid_resume_access.assert_called_once_with("user-123")
+
+    def test_generate_resume_blocks_free_users(self):
+        with patch("backend.api.resume._normalize_resume_user_id", return_value="free-user"), patch(
+            "backend.api.resume._require_paid_resume_access",
+            side_effect=HTTPException(
+                status_code=403,
+                detail={
+                    "code": "RESUME_PLAN_REQUIRED",
+                    "reason": "resume_access_requires_paid_plan",
+                    "message": "Resume generation is available only on paid plans.",
+                },
+            ),
+        ):
+            response = self.client.post(
+                "/api/resume/generate",
+                json={
+                    "user_id": "free-user",
+                    "jd_text": "Backend Engineer with Python",
+                    "raw_text": "Built APIs and improved performance by 20%.",
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.json()
+        self.assertEqual(payload["detail"]["code"], "RESUME_PLAN_REQUIRED")
+
+    def test_get_resume_blocks_free_users(self):
+        with patch("backend.api.resume._normalize_resume_user_id", return_value="free-user"), patch(
+            "backend.api.resume._require_paid_resume_access",
+            side_effect=HTTPException(
+                status_code=403,
+                detail={
+                    "code": "RESUME_PLAN_REQUIRED",
+                    "reason": "resume_access_requires_paid_plan",
+                    "message": "Resume generation is available only on paid plans.",
+                },
+            ),
+        ):
+            response = self.client.get("/api/resume/free-user")
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.json()
+        self.assertEqual(payload["detail"]["reason"], "resume_access_requires_paid_plan")
 
 
 if __name__ == "__main__":
