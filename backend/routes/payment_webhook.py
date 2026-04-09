@@ -24,9 +24,21 @@ _SUPPORTED_EVENTS = {"payment.captured", "payment.failed"}
 
 def extract_event_id(payload: dict[str, Any]) -> str | None:
     event_id = payload.get("id")
-    if event_id is None:
-        return None
-    return str(event_id)
+    if event_id is not None:
+        return str(event_id)
+
+    event = str(payload.get("event") or "").strip()
+    account_id = str(payload.get("account_id") or "").strip()
+    created_at = str(payload.get("created_at") or "").strip()
+    payment = _payment_entity(payload)
+    payment_id = str(payment.get("id") or "").strip()
+
+    if event and payment_id:
+        identity_parts = [part for part in (account_id, event, payment_id, created_at) if part]
+        if identity_parts:
+            return ":".join(identity_parts)
+
+    return None
 
 
 def _payment_entity(payload: dict[str, Any]) -> dict[str, Any]:
@@ -75,6 +87,7 @@ def _duplicate_response(event_id: str, event: str, payment_id: str, user_id: str
     }
 
 
+@router.post("/api/webhook/razorpay")
 @router.post("/webhook/razorpay")
 async def payment_webhook(request: Request):
     raw_body = await request.body()
@@ -124,7 +137,12 @@ async def payment_webhook(request: Request):
     if event not in _SUPPORTED_EVENTS:
         update_webhook_event(event_id, "ignored", error="unsupported_event")
         log_event("webhook_ignored", {"event_id": event_id, "event": event})
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Unsupported webhook event: {event}")
+        return {
+            "status": "ignored",
+            "event_id": event_id,
+            "event": event,
+            "reason": "unsupported_event",
+        }
 
     payment = _payment_entity(payload)
     metadata = _resolve_payment_context(

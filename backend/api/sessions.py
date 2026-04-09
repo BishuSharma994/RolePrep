@@ -30,6 +30,28 @@ def _visible_plan(user: dict[str, Any]) -> str | None:
     return None if resolved_plan == "free" else str(resolved_plan)
 
 
+def _serialize_user_state(user_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "user_id": str(user_id),
+        "session_id": None,
+        "role": "",
+        "jd_text": "",
+        "current_question": None,
+        "current_stage": None,
+        "question_count": 0,
+        "history": [],
+        "scores": [],
+        "active_session": bool(user.get("active_session", False)),
+        "active_session_plan": _visible_plan(user),
+        "session_credits": int(user.get("session_credits", 0) or 0),
+        "subscription_expiry": int(user.get("subscription_expiry", 0) or 0),
+        "selected_plan": user.get("selected_plan", "free"),
+        "session_started_at": user.get("session_started_at"),
+        "last_session_activity_at": user.get("last_session_activity_at"),
+        "updated_at": user.get("last_payment_at") or user.get("last_active_at"),
+    }
+
+
 def _serialize_session(user_id: str, session: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     return {
         "user_id": str(user_id),
@@ -112,10 +134,10 @@ async def list_sessions(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     if user_id:
+        user = get_user(str(user_id))
         session = get_session(str(user_id))
         if not session:
-            return {"sessions": []}
-        user = get_user(str(user_id))
+            return {"sessions": [_serialize_user_state(str(user_id), user)]}
         return {"sessions": [_serialize_session(str(user_id), session, user)]}
 
     projection = {
