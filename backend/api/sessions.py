@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from backend.handlers.interview_handler import get_session, start_interview
 from backend.services.db import users
-from backend.user_store import get_user
+from backend.user_store import get_user, resolve_plan
 
 router = APIRouter()
 
@@ -19,6 +19,15 @@ class SessionCreateRequest(BaseModel):
     parser_data: dict[str, Any] = Field(default_factory=dict)
     resume_path: str | None = None
     jd_path: str | None = None
+
+
+def _visible_plan(user: dict[str, Any]) -> str | None:
+    active_plan = user.get("active_session_plan") or user.get("current_session_plan")
+    if active_plan:
+        return str(active_plan)
+
+    resolved_plan = resolve_plan(user)
+    return None if resolved_plan == "free" else str(resolved_plan)
 
 
 def _serialize_session(user_id: str, session: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
@@ -33,7 +42,7 @@ def _serialize_session(user_id: str, session: dict[str, Any], user: dict[str, An
         "history": list(session.get("history", [])),
         "scores": list(session.get("scores", [])),
         "active_session": bool(user.get("active_session", False)),
-        "active_session_plan": user.get("active_session_plan") or user.get("current_session_plan"),
+        "active_session_plan": _visible_plan(user),
         "session_credits": int(user.get("session_credits", 0) or 0),
         "subscription_expiry": int(user.get("subscription_expiry", 0) or 0),
         "selected_plan": user.get("selected_plan", "free"),
@@ -44,6 +53,13 @@ def _serialize_session(user_id: str, session: dict[str, Any], user: dict[str, An
 
 
 def _serialize_session_document(document: dict[str, Any]) -> dict[str, Any]:
+    visible_plan = document.get("active_session_plan") or document.get("current_session_plan")
+    if not visible_plan:
+        if int(document.get("subscription_expiry", 0) or 0) > 0:
+            visible_plan = "premium"
+        elif int(document.get("session_credits", 0) or 0) > 0:
+            visible_plan = "session"
+
     return {
         "user_id": str(document.get("user_id") or ""),
         "session_id": document.get("session_id"),
@@ -55,7 +71,7 @@ def _serialize_session_document(document: dict[str, Any]) -> dict[str, Any]:
         "history": list(document.get("session_history", [])),
         "scores": list(document.get("session_scores", [])),
         "active_session": bool(document.get("active_session", False)),
-        "active_session_plan": document.get("active_session_plan") or document.get("current_session_plan"),
+        "active_session_plan": visible_plan,
         "session_credits": int(document.get("session_credits", 0) or 0),
         "subscription_expiry": int(document.get("subscription_expiry", 0) or 0),
         "selected_plan": document.get("selected_plan", "free"),

@@ -59,7 +59,12 @@ def add_sessions(user_id, count):
 
     result = users.update_one(
         {"user_id": user_id},
-        {"$inc": {"session_credits": count}},
+        {
+            "$inc": {"session_credits": count},
+            "$set": {
+                "selected_plan": "session_29" if count > 1 else "session_10",
+            },
+        },
         upsert=True,
     )
     if not result.acknowledged:
@@ -84,6 +89,11 @@ def set_unlimited(user_id, days=DEFAULT_PREMIUM_DURATION_DAYS):
     days = int(days)
     get_user(user_id)
     activate_premium(user_id, days * 86400)
+    users.update_one(
+        {"user_id": user_id},
+        {"$set": {"selected_plan": "premium"}},
+        upsert=True,
+    )
 
     user = users.find_one({"user_id": user_id}, {"subscription_expiry": 1, "_id": 0}) or {}
     new_expiry = int(user.get("subscription_expiry", 0) or 0)
