@@ -62,6 +62,20 @@ async def request_otp(payload: RequestOtpPayload):
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
+@router.get("/auth/config")
+async def auth_config():
+    from backend.utils.config import AUTH_DEBUG_OTP, AUTH_REQUIRE_WEB_API, AUTH_SMTP_FROM_EMAIL, AUTH_SMTP_HOST
+
+    otp_login_enabled = bool(AUTH_DEBUG_OTP or (AUTH_SMTP_HOST and AUTH_SMTP_FROM_EMAIL))
+    return {
+        "status": "ok",
+        "auth_required": bool(AUTH_REQUIRE_WEB_API),
+        "anonymous_mode_allowed": not bool(AUTH_REQUIRE_WEB_API),
+        "otp_login_enabled": otp_login_enabled,
+        "account_sync_enabled": True,
+    }
+
+
 @router.post("/auth/verify-otp")
 async def verify_otp(payload: VerifyOtpPayload):
     from backend.auth_service import AuthError

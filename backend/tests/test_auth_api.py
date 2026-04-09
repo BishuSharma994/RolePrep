@@ -28,6 +28,17 @@ class AuthApiTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "sent")
         self.assertEqual(response.json()["email"], "person@example.com")
 
+    def test_auth_config_returns_flags(self):
+        response = self.client.get("/api/auth/config")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("auth_required", payload)
+        self.assertIn("anonymous_mode_allowed", payload)
+        self.assertIn("otp_login_enabled", payload)
+        self.assertTrue(payload["account_sync_enabled"])
+
     @patch("backend.api.auth._verify_email_otp")
     def test_verify_otp_returns_auth_payload(self, mock_verify_email_otp):
         mock_verify_email_otp.return_value = {
