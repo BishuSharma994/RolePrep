@@ -44,6 +44,7 @@ account_links = db["account_links"]
 auth_otps = db["auth_otps"]
 auth_sessions = db["auth_sessions"]
 auth_identities = db["auth_identities"]
+resumes = db["resumes"]
 
 
 def init_db():
@@ -72,3 +73,5 @@ def init_db():
     auth_sessions.create_index("status")
     auth_sessions.create_index("expires_at")
     auth_identities.create_index("email", unique=True)
+    resumes.create_index("user_id")
+    resumes.create_index("created_at")

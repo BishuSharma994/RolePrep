@@ -11,6 +11,7 @@ from backend.api.account import router as account_router
 from backend.api.auth import router as auth_router
 from backend.api.audio import router as audio_router
 from backend.api.payments import router as payments_router
+from backend.api.resume import router as resume_router
 from backend.api.sessions import router as sessions_router
 from backend.routes.payment_webhook import router as payment_router
 from backend.routes.track import router as track_router
@@ -48,6 +49,7 @@ app.include_router(audio_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(payments_router, prefix="/api")
+app.include_router(resume_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(track_router, prefix="/api")
 app.include_router(payment_router)
