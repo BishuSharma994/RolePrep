@@ -173,6 +173,34 @@ def save_session_checkpoint(user_id: str, **updates) -> bool:
     return True
 
 
+def record_answer_analysis(user_id: str, answer_text: str, analysis: dict) -> bool:
+    session = get_session(user_id)
+    if not session:
+        return False
+
+    update_user_last_active(user_id)
+
+    stored_analysis = dict(analysis or {})
+    next_question = str(stored_analysis.get("next_question") or session.get("current_question") or "").strip()
+    followup = stored_analysis.get("followup") if isinstance(stored_analysis.get("followup"), dict) else {}
+    requires_stage_change = bool(followup.get("requires_stage_change"))
+    latest_score = float(stored_analysis.get("legacy_score_10", 0) or 0)
+
+    session["question_count"] = int(session.get("question_count", 0) or 0) + 1
+    session["history"].append(str(answer_text or ""))
+    session["scores"].append(latest_score)
+    session["last_answer"] = str(answer_text or "")
+    session["latest_answer_analysis"] = stored_analysis
+    session["pending_followup"] = followup or None
+    session["current_question"] = next_question or session.get("current_question")
+    session["current_stage"] = "followup" if requires_stage_change else "interview"
+    session["last_question_ts"] = time.time()
+    session["pending_answer"] = None
+
+    _persist_session(user_id, session)
+    return True
+
+
 def record_question_sent(user_id: str, question: str, stage: str = "interview", **extra_updates) -> bool:
     updates = {
         "current_question": question,

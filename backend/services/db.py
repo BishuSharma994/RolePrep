@@ -40,6 +40,10 @@ webhooks = db["webhooks"]
 audit_logs = db["audit_logs"]
 rate_limits = db["rate_limits"]
 feedbacks = db["feedbacks"]
+account_links = db["account_links"]
+auth_otps = db["auth_otps"]
+auth_sessions = db["auth_sessions"]
+auth_identities = db["auth_identities"]
 
 
 def init_db():
@@ -56,3 +60,15 @@ def init_db():
     feedbacks.create_index("session_id")
     feedbacks.create_index("user_id")
     feedbacks.create_index("created_at")
+    account_links.create_index("code", unique=True)
+    account_links.create_index("owner_user_id")
+    account_links.create_index("status")
+    account_links.create_index("expires_at")
+    auth_otps.create_index("email")
+    auth_otps.create_index("status")
+    auth_otps.create_index("expires_at")
+    auth_sessions.create_index("token_hash", unique=True)
+    auth_sessions.create_index("user_id")
+    auth_sessions.create_index("status")
+    auth_sessions.create_index("expires_at")
+    auth_identities.create_index("email", unique=True)

@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from backend.api.account import router as account_router
+from backend.api.auth import router as auth_router
 from backend.api.audio import router as audio_router
 from backend.api.payments import router as payments_router
 from backend.api.sessions import router as sessions_router
@@ -43,6 +45,8 @@ async def healthz():
 
 
 app.include_router(audio_router, prefix="/api")
+app.include_router(account_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 app.include_router(payments_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(track_router, prefix="/api")

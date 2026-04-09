@@ -30,6 +30,8 @@ def _default_user(user_id):
         "sessions_started": 0,
         "sessions_completed": 0,
         "usage_reserved_for": None,
+        "verified_email": None,
+        "last_login_at": None,
     }
 
 
@@ -77,6 +79,8 @@ def update_user(user):
             "sessions_started": int(user.get("sessions_started", 0) or 0),
             "sessions_completed": int(user.get("sessions_completed", 0) or 0),
             "usage_reserved_for": user.get("usage_reserved_for"),
+            "verified_email": user.get("verified_email"),
+            "last_login_at": user.get("last_login_at"),
         }
     )
     users.update_one(

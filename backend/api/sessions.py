@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.handlers.interview_handler import get_session, start_interview
@@ -13,12 +13,21 @@ router = APIRouter()
 
 
 class SessionCreateRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)
+    user_id: str | None = None
     role: str = Field(..., min_length=1)
     jd_text: str = Field(..., min_length=1)
     parser_data: dict[str, Any] = Field(default_factory=dict)
     resume_path: str | None = None
     jd_path: str | None = None
+
+
+def _resolve_request_user_id(user_id: str | None, authorization: str | None) -> str:
+    from backend.auth_service import AuthError, resolve_request_user_id
+
+    try:
+        return resolve_request_user_id(user_id, authorization)
+    except AuthError:
+        raise
 
 
 def _visible_plan(user: dict[str, Any]) -> str | None:
@@ -49,6 +58,8 @@ def _serialize_user_state(user_id: str, user: dict[str, Any]) -> dict[str, Any]:
         "session_started_at": user.get("session_started_at"),
         "last_session_activity_at": user.get("last_session_activity_at"),
         "updated_at": user.get("last_payment_at") or user.get("last_active_at"),
+        "latest_answer_analysis": None,
+        "pending_followup": None,
     }
 
 
@@ -71,6 +82,8 @@ def _serialize_session(user_id: str, session: dict[str, Any], user: dict[str, An
         "session_started_at": user.get("session_started_at"),
         "last_session_activity_at": user.get("last_session_activity_at"),
         "updated_at": session.get("last_question_ts"),
+        "latest_answer_analysis": session.get("latest_answer_analysis"),
+        "pending_followup": session.get("pending_followup"),
     }
 
 
@@ -100,13 +113,22 @@ def _serialize_session_document(document: dict[str, Any]) -> dict[str, Any]:
         "session_started_at": document.get("session_started_at"),
         "last_session_activity_at": document.get("last_session_activity_at"),
         "updated_at": document.get("updated_at"),
+        "latest_answer_analysis": document.get("latest_answer_analysis"),
+        "pending_followup": document.get("pending_followup"),
     }
 
 
 @router.post("/sessions")
-async def create_session(payload: SessionCreateRequest):
+async def create_session(payload: SessionCreateRequest, request: Request):
+    from backend.auth_service import AuthError
+
+    try:
+        resolved_user_id = _resolve_request_user_id(payload.user_id, request.headers.get("authorization"))
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
     result = start_interview(
-        user_id=str(payload.user_id),
+        user_id=resolved_user_id,
         role=str(payload.role),
         jd_text=str(payload.jd_text),
         parser_data=payload.parser_data,
@@ -117,28 +139,46 @@ async def create_session(payload: SessionCreateRequest):
     if result.get("status") != "started":
         raise HTTPException(status_code=403, detail=result)
 
-    session = get_session(str(payload.user_id))
+    session = get_session(resolved_user_id)
     if not session:
         raise HTTPException(status_code=500, detail="Session was created but could not be loaded")
 
-    user = get_user(str(payload.user_id))
+    user = get_user(resolved_user_id)
     return {
         "status": "started",
-        "session": _serialize_session(str(payload.user_id), session, user),
+        "session": _serialize_session(resolved_user_id, session, user),
     }
 
 
 @router.get("/sessions")
 async def list_sessions(
+    request: Request,
     user_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    if user_id:
-        user = get_user(str(user_id))
-        session = get_session(str(user_id))
+    from backend.auth_service import AUTH_REQUIRE_WEB_API, AuthError, get_auth_session_from_header
+
+    try:
+        auth_session = get_auth_session_from_header(request.headers.get("authorization"))
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    resolved_user_id = str(user_id or "").strip()
+    if auth_session:
+        authenticated_user_id = str(auth_session.get("user_id") or "").strip()
+        if resolved_user_id and resolved_user_id != authenticated_user_id:
+            raise HTTPException(status_code=403, detail="Authenticated user does not match requested user_id")
+        resolved_user_id = authenticated_user_id
+
+    if resolved_user_id:
+        user = get_user(resolved_user_id)
+        session = get_session(resolved_user_id)
         if not session:
-            return {"sessions": [_serialize_user_state(str(user_id), user)]}
-        return {"sessions": [_serialize_session(str(user_id), session, user)]}
+            return {"sessions": [_serialize_user_state(resolved_user_id, user)]}
+        return {"sessions": [_serialize_session(resolved_user_id, session, user)]}
+
+    if AUTH_REQUIRE_WEB_API:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     projection = {
         "_id": 0,
@@ -160,6 +200,8 @@ async def list_sessions(
         "session_started_at": 1,
         "last_session_activity_at": 1,
         "updated_at": 1,
+        "latest_answer_analysis": 1,
+        "pending_followup": 1,
     }
     documents = list(
         users.find({"active_session": True}, projection).sort("last_session_activity_at", -1).limit(int(limit))
