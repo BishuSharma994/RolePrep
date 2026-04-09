@@ -15,6 +15,7 @@ def get_clean(key):
 
 OPENAI_API_KEY = get_clean("OPENAI_API_KEY")
 REDIS_URL = get_clean("REDIS_URL")
+FRONTEND_APP_URL = get_clean("FRONTEND_APP_URL") or "https://www.roleprep.in"
 
 RAZORPAY_KEY = get_clean("RAZORPAY_KEY") or get_clean("RAZORPAY_KEY_ID")
 RAZORPAY_SECRET = get_clean("RAZORPAY_SECRET") or get_clean("RAZORPAY_KEY_SECRET")

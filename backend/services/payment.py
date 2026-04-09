@@ -1,8 +1,10 @@
 import hashlib
 import hmac
+from urllib.parse import urlencode
 
 import razorpay
 from backend.utils.config import (
+    FRONTEND_APP_URL,
     RAZORPAY_KEY,
     RAZORPAY_SECRET,
     RAZORPAY_WEBHOOK_SECRET,
@@ -54,6 +56,18 @@ def get_client():
     return _client
 
 
+def _payment_callback_url(user_id, plan_type):
+    base_url = str(FRONTEND_APP_URL or "https://www.roleprep.in").strip().rstrip("/")
+    query = urlencode(
+        {
+            "payment": "processing",
+            "user_id": str(user_id),
+            "plan_type": str(plan_type),
+        }
+    )
+    return f"{base_url}/?{query}"
+
+
 def create_payment_link(user_id, plan_type):
     if plan_type not in PLAN_PRICING:
         raise ValueError("Unsupported plan_type")
@@ -76,6 +90,8 @@ def create_payment_link(user_id, plan_type):
                 "user_id": str(user_id),
                 "plan": plan_type,
             },
+            "callback_url": _payment_callback_url(user_id, plan_type),
+            "callback_method": "get",
         }
     )
 
