@@ -11,15 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 --decode > ~/.ssh/roleprep_deploy_key
+          chmod 600 ~/.ssh/roleprep_deploy_key
+
       - name: Deploy to VPS over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            export APP_ROOT="${{ secrets.VPS_APP_ROOT }}"
-            export VENV_PATH="${{ secrets.VPS_VENV_PATH }}"
-            export SERVICE_NAME="${{ secrets.VPS_SERVICE_NAME }}"
-            export BRANCH="main"
-            bash "$APP_ROOT/deploy.sh"
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/roleprep_deploy_key -o StrictHostKeyChecking=no "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "export APP_ROOT='${{ secrets.VPS_APP_ROOT }}' VENV_PATH='${{ secrets.VPS_VENV_PATH }}' SERVICE_NAME='${{ secrets.VPS_SERVICE_NAME }}' BRANCH='main'; bash '${{ secrets.VPS_APP_ROOT }}/deploy.sh'"
