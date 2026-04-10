@@ -64,9 +64,10 @@ async def request_otp(payload: RequestOtpPayload):
 
 @router.get("/auth/config")
 async def auth_config():
-    from backend.utils.config import AUTH_DEBUG_OTP, AUTH_REQUIRE_WEB_API, AUTH_SMTP_FROM_EMAIL, AUTH_SMTP_HOST
+    from backend.auth_service import otp_delivery_configured
+    from backend.utils.config import AUTH_DEBUG_OTP, AUTH_REQUIRE_WEB_API
 
-    otp_login_enabled = bool(AUTH_DEBUG_OTP or (AUTH_SMTP_HOST and AUTH_SMTP_FROM_EMAIL))
+    otp_login_enabled = bool(AUTH_DEBUG_OTP or otp_delivery_configured())
     return {
         "status": "ok",
         "auth_required": bool(AUTH_REQUIRE_WEB_API),

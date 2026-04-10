@@ -10,6 +10,8 @@ from datetime import datetime
 from email.message import EmailMessage
 from typing import Any
 
+import requests
+
 from backend.utils.config import (
     AUTH_DEBUG_OTP,
     AUTH_OTP_RESEND_COOLDOWN_SECONDS,
@@ -21,6 +23,11 @@ from backend.utils.config import (
     AUTH_SMTP_PASSWORD,
     AUTH_SMTP_PORT,
     AUTH_SMTP_USERNAME,
+    ZEPTO_API_HOST,
+    ZEPTO_API_URL,
+    ZEPTO_FROM_EMAIL,
+    ZEPTO_FROM_NAME,
+    ZEPTO_SEND_MAIL_TOKEN,
 )
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -74,7 +81,69 @@ def _smtp_configured() -> bool:
     return bool(AUTH_SMTP_HOST and AUTH_SMTP_FROM_EMAIL)
 
 
+def _zepto_configured() -> bool:
+    return bool((ZEPTO_API_URL or ZEPTO_API_HOST) and ZEPTO_SEND_MAIL_TOKEN and ZEPTO_FROM_EMAIL)
+
+
+def otp_delivery_configured() -> bool:
+    return _zepto_configured() or _smtp_configured()
+
+
+def _zepto_api_url() -> str:
+    configured_url = str(ZEPTO_API_URL or "").strip()
+    if configured_url:
+        return configured_url
+
+    host = str(ZEPTO_API_HOST or "").strip()
+    if not host:
+        raise AuthError("ZeptoMail API host is not configured", status_code=503)
+
+    if host.startswith("http://") or host.startswith("https://"):
+        return host.rstrip("/") + "/v1.1/email"
+
+    return f"https://{host}/v1.1/email"
+
+
+def _send_otp_via_zepto(email: str, otp: str) -> None:
+    if not _zepto_configured():
+        raise AuthError("ZeptoMail delivery is not configured", status_code=503)
+
+    response = requests.post(
+        _zepto_api_url(),
+        headers={
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": str(ZEPTO_SEND_MAIL_TOKEN),
+        },
+        json={
+            "from": {
+                "address": str(ZEPTO_FROM_EMAIL),
+                "name": str(ZEPTO_FROM_NAME),
+            },
+            "to": [
+                {
+                    "email_address": {
+                        "address": str(email),
+                    }
+                }
+            ],
+            "subject": "Your RolePrep login code",
+            "textbody": (
+                f"Your RolePrep login code is {otp}. "
+                f"It expires in {max(1, AUTH_OTP_TTL_SECONDS // 60)} minutes."
+            ),
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        raise AuthError(f"ZeptoMail delivery failed: {response.text}", status_code=503)
+
+
 def _send_otp_email(email: str, otp: str) -> None:
+    if _zepto_configured():
+        _send_otp_via_zepto(email, otp)
+        return
+
     if not _smtp_configured():
         raise AuthError("OTP email delivery is not configured", status_code=503)
 
