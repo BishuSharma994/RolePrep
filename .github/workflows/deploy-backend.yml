@@ -1,0 +1,25 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            export APP_ROOT="${{ secrets.VPS_APP_ROOT }}"
+            export VENV_PATH="${{ secrets.VPS_VENV_PATH }}"
+            export SERVICE_NAME="${{ secrets.VPS_SERVICE_NAME }}"
+            export BRANCH="main"
+            bash "$APP_ROOT/deploy.sh"

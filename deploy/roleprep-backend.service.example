@@ -1,0 +1,14 @@
+[Unit]
+Description=RolePrep Backend
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/roleprep/repo
+EnvironmentFile=/opt/roleprep/shared/.env
+ExecStart=/opt/roleprep/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
