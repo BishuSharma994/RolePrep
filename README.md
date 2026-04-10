@@ -1,5 +1,11 @@
 # RolePrep
 
+## Operations
+
+Production backend deployment runbook:
+
+- [`deploy/README.md`](deploy/README.md)
+
 ## Project Overview
 
 RolePrep is a Telegram-based interview preparation platform built around controlled paid access to an interview engine. The system follows a production MVP model:
