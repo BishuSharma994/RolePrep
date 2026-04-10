@@ -45,6 +45,11 @@ async def healthz():
     return {"status": "ok"}
 
 
+@app.get("/buildz")
+async def buildz():
+    return {"status": "ok", "deployment": "github-actions"}
+
+
 app.include_router(audio_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
