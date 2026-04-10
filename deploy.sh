@@ -26,4 +26,12 @@ systemctl daemon-reload
 systemctl restart "$SERVICE_NAME"
 systemctl --no-pager --full status "$SERVICE_NAME"
 
-curl --fail "$HEALTHCHECK_URL"
+for _ in 1 2 3 4 5 6; do
+  if curl --fail --silent "$HEALTHCHECK_URL" >/dev/null; then
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "Health check failed: $HEALTHCHECK_URL" >&2
+exit 1
