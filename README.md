@@ -5,6 +5,7 @@
 Production backend deployment runbook:
 
 - [`deploy/README.md`](deploy/README.md)
+- [`deploy/RELEASE_CHECKLIST.md`](deploy/RELEASE_CHECKLIST.md)
 
 ## Project Overview
 
